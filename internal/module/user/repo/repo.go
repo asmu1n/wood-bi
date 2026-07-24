@@ -11,16 +11,16 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
-// Repo 基于 Ent 的用户仓储。
-type Repo struct {
+// repo 基于 Ent 的用户仓储。
+type repo struct {
 	client *ent.Client
 }
 
-func New(client *ent.Client) *Repo {
-	return &Repo{client: client}
+func New(client *ent.Client) user.Repository {
+	return &repo{client: client}
 }
 
-func (r *Repo) Create(ctx context.Context, account, passwordHash string, name, avatar *string, role string) (*user.User, error) {
+func (r *repo) Create(ctx context.Context, account, passwordHash string, name, avatar *string, role string) (*user.User, error) {
 	builder := r.client.User.Create().
 		SetAccount(account).
 		SetPasswordHash(passwordHash).
@@ -38,7 +38,7 @@ func (r *Repo) Create(ctx context.Context, account, passwordHash string, name, a
 	return toDomain(row), nil
 }
 
-func (r *Repo) GetByID(ctx context.Context, id int64) (*user.User, error) {
+func (r *repo) GetByID(ctx context.Context, id int64) (*user.User, error) {
 	row, err := r.client.User.Query().
 		Where(
 			entuser.IDEQ(id),
@@ -54,7 +54,7 @@ func (r *Repo) GetByID(ctx context.Context, id int64) (*user.User, error) {
 	return toDomain(row), nil
 }
 
-func (r *Repo) GetByAccount(ctx context.Context, account string) (*user.User, error) {
+func (r *repo) GetByAccount(ctx context.Context, account string) (*user.User, error) {
 	row, err := r.client.User.Query().
 		Where(
 			entuser.AccountEQ(account),
@@ -70,7 +70,7 @@ func (r *Repo) GetByAccount(ctx context.Context, account string) (*user.User, er
 	return toDomain(row), nil
 }
 
-func (r *Repo) GetCredentialByAccount(ctx context.Context, account string) (*user.User, string, error) {
+func (r *repo) GetCredentialByAccount(ctx context.Context, account string) (*user.User, string, error) {
 	row, err := r.client.User.Query().
 		Where(
 			entuser.AccountEQ(account),
@@ -86,7 +86,7 @@ func (r *Repo) GetCredentialByAccount(ctx context.Context, account string) (*use
 	return toDomain(row), row.PasswordHash, nil
 }
 
-func (r *Repo) UpdateProfile(ctx context.Context, id int64, name, avatar *string) (*user.User, error) {
+func (r *repo) UpdateProfile(ctx context.Context, id int64, name, avatar *string) (*user.User, error) {
 	upd := r.client.User.UpdateOneID(id).
 		Where(entuser.DeletedAtIsNil())
 	if name != nil {
@@ -105,7 +105,7 @@ func (r *Repo) UpdateProfile(ctx context.Context, id int64, name, avatar *string
 	return toDomain(row), nil
 }
 
-func (r *Repo) UpdateAdmin(ctx context.Context, id int64, name, avatar, role *string, passwordHash *string) (*user.User, error) {
+func (r *repo) UpdateAdmin(ctx context.Context, id int64, name, avatar, role *string, passwordHash *string) (*user.User, error) {
 	upd := r.client.User.UpdateOneID(id).
 		Where(entuser.DeletedAtIsNil())
 	if name != nil {
@@ -130,7 +130,7 @@ func (r *Repo) UpdateAdmin(ctx context.Context, id int64, name, avatar, role *st
 	return toDomain(row), nil
 }
 
-func (r *Repo) SoftDelete(ctx context.Context, id int64) error {
+func (r *repo) SoftDelete(ctx context.Context, id int64) error {
 	now := time.Now()
 	n, err := r.client.User.Update().
 		Where(
@@ -148,7 +148,7 @@ func (r *Repo) SoftDelete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *Repo) ListPage(ctx context.Context, q user.QueryParams) ([]*user.User, int64, error) {
+func (r *repo) ListPage(ctx context.Context, q user.QueryParams) ([]*user.User, int64, error) {
 	query := r.client.User.Query().Where(entuser.DeletedAtIsNil())
 	if q.ID > 0 {
 		query = query.Where(entuser.IDEQ(q.ID))
@@ -184,7 +184,7 @@ func (r *Repo) ListPage(ctx context.Context, q user.QueryParams) ([]*user.User, 
 	return out, int64(total), nil
 }
 
-func (r *Repo) ExistsAccount(ctx context.Context, account string) (bool, error) {
+func (r *repo) ExistsAccount(ctx context.Context, account string) (bool, error) {
 	return r.client.User.Query().
 		Where(
 			entuser.AccountEQ(account),
@@ -213,6 +213,3 @@ func toDomain(row *ent.User) *user.User {
 	}
 	return u
 }
-
-// 确保实现接口。
-var _ user.Repository = (*Repo)(nil)
