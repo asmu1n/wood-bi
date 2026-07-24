@@ -5,12 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"wood-bi/internal/httpapi"
 	"wood-bi/internal/infra/database"
 	"wood-bi/internal/infra/redis"
-	"wood-bi/internal/infra/scheduler"
+	"wood-bi/internal/module/user"
+	userrepo "wood-bi/internal/module/user/repo"
 	"wood-bi/internal/pkg/logger"
 
 	"github.com/gin-contrib/sessions"
@@ -21,9 +21,9 @@ import (
 	_ "wood-bi/docs/api/swagger"
 )
 
-// @title           Go Web API Template
+// @title           wood-bi API
 // @version         1.0
-// @description     Go Web 后端工程模板接口文档（业务模块由使用者自行接入）
+// @description     AI BI 后端（Go）：用户与图表分析
 // @host            localhost:8080
 // @BasePath        /api
 // @securityDefinitions.apikey SessionAuth
@@ -59,38 +59,15 @@ func main() {
 		logger.Fatal("connect redis failed", logger.FieldErr, err)
 	}
 	defer redisClient.Close()
+	_ = redisClient // Phase 2+：cache / lock / rate limit
 
-	// 业务装配示例（接入 module 后取消注释并注入）：
-	// locker := lock.New(redisClient)
-	// cacheClient := cache.New(redisClient)
-	// xxxSvc := xxx.NewService(xxxrepo.New(db.Client), cacheClient, locker)
-	_ = redisClient // 保持连接就绪；接入 cache/lock 时去掉此行
-
-	// 定时任务骨架：注册业务 job 后 Start
-	sched := scheduler.New()
-	// if _, err := sched.Schedule("0 0 3 * * *", func() { ... }); err != nil {
-	// 	logger.Fatal("schedule job failed", logger.FieldErr, err)
-	// }
-	sched.Start()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := sched.Stop(shutdownCtx); err != nil {
-			logger.Warn("scheduler stop",
-				logger.FieldPurpose, logger.PurposeJob,
-				logger.FieldModule, "scheduler",
-				logger.FieldEvent, "cron.stop_error",
-				logger.FieldErr, err,
-			)
-		}
-	}()
+	userSvc := user.NewService(userrepo.New(db.Client))
 
 	r.Use(sessions.Sessions("session", store))
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// 接入业务后：httpapi.RegisterRouter(r, xxxSvc, ...)
-	httpapi.RegisterRouter(r)
+	httpapi.RegisterRouter(r, userSvc)
 
 	logger.Info("http server starting",
 		logger.FieldPurpose, logger.PurposeInfra,

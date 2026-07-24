@@ -6,5 +6,8 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
-// Placeholder is the predicate function for placeholder builders.
-type Placeholder func(*sql.Selector)
+// Chart is the predicate function for chart builders.
+type Chart func(*sql.Selector)
+
+// User is the predicate function for user builders.
+type User func(*sql.Selector)

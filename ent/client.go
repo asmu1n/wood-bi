@@ -11,11 +11,13 @@ import (
 
 	"wood-bi/ent/migrate"
 
-	"wood-bi/ent/placeholder"
+	"wood-bi/ent/chart"
+	"wood-bi/ent/user"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqlgraph"
 )
 
 // Client is the client that holds all ent builders.
@@ -23,8 +25,10 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
-	// Placeholder is the client for interacting with the Placeholder builders.
-	Placeholder *PlaceholderClient
+	// Chart is the client for interacting with the Chart builders.
+	Chart *ChartClient
+	// User is the client for interacting with the User builders.
+	User *UserClient
 }
 
 // NewClient creates a new client configured with the given options.
@@ -36,7 +40,8 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
-	c.Placeholder = NewPlaceholderClient(c.config)
+	c.Chart = NewChartClient(c.config)
+	c.User = NewUserClient(c.config)
 }
 
 type (
@@ -127,9 +132,10 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:         ctx,
-		config:      cfg,
-		Placeholder: NewPlaceholderClient(cfg),
+		ctx:    ctx,
+		config: cfg,
+		Chart:  NewChartClient(cfg),
+		User:   NewUserClient(cfg),
 	}, nil
 }
 
@@ -147,16 +153,17 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:         ctx,
-		config:      cfg,
-		Placeholder: NewPlaceholderClient(cfg),
+		ctx:    ctx,
+		config: cfg,
+		Chart:  NewChartClient(cfg),
+		User:   NewUserClient(cfg),
 	}, nil
 }
 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		Placeholder.
+//		Chart.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -178,126 +185,130 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
-	c.Placeholder.Use(hooks...)
+	c.Chart.Use(hooks...)
+	c.User.Use(hooks...)
 }
 
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
-	c.Placeholder.Intercept(interceptors...)
+	c.Chart.Intercept(interceptors...)
+	c.User.Intercept(interceptors...)
 }
 
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
-	case *PlaceholderMutation:
-		return c.Placeholder.mutate(ctx, m)
+	case *ChartMutation:
+		return c.Chart.mutate(ctx, m)
+	case *UserMutation:
+		return c.User.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
 	}
 }
 
-// PlaceholderClient is a client for the Placeholder schema.
-type PlaceholderClient struct {
+// ChartClient is a client for the Chart schema.
+type ChartClient struct {
 	config
 }
 
-// NewPlaceholderClient returns a client for the Placeholder from the given config.
-func NewPlaceholderClient(c config) *PlaceholderClient {
-	return &PlaceholderClient{config: c}
+// NewChartClient returns a client for the Chart from the given config.
+func NewChartClient(c config) *ChartClient {
+	return &ChartClient{config: c}
 }
 
 // Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `placeholder.Hooks(f(g(h())))`.
-func (c *PlaceholderClient) Use(hooks ...Hook) {
-	c.hooks.Placeholder = append(c.hooks.Placeholder, hooks...)
+// A call to `Use(f, g, h)` equals to `chart.Hooks(f(g(h())))`.
+func (c *ChartClient) Use(hooks ...Hook) {
+	c.hooks.Chart = append(c.hooks.Chart, hooks...)
 }
 
 // Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `placeholder.Intercept(f(g(h())))`.
-func (c *PlaceholderClient) Intercept(interceptors ...Interceptor) {
-	c.inters.Placeholder = append(c.inters.Placeholder, interceptors...)
+// A call to `Intercept(f, g, h)` equals to `chart.Intercept(f(g(h())))`.
+func (c *ChartClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Chart = append(c.inters.Chart, interceptors...)
 }
 
-// Create returns a builder for creating a Placeholder entity.
-func (c *PlaceholderClient) Create() *PlaceholderCreate {
-	mutation := newPlaceholderMutation(c.config, OpCreate)
-	return &PlaceholderCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+// Create returns a builder for creating a Chart entity.
+func (c *ChartClient) Create() *ChartCreate {
+	mutation := newChartMutation(c.config, OpCreate)
+	return &ChartCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
-// CreateBulk returns a builder for creating a bulk of Placeholder entities.
-func (c *PlaceholderClient) CreateBulk(builders ...*PlaceholderCreate) *PlaceholderCreateBulk {
-	return &PlaceholderCreateBulk{config: c.config, builders: builders}
+// CreateBulk returns a builder for creating a bulk of Chart entities.
+func (c *ChartClient) CreateBulk(builders ...*ChartCreate) *ChartCreateBulk {
+	return &ChartCreateBulk{config: c.config, builders: builders}
 }
 
 // MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
 // a builder and applies setFunc on it.
-func (c *PlaceholderClient) MapCreateBulk(slice any, setFunc func(*PlaceholderCreate, int)) *PlaceholderCreateBulk {
+func (c *ChartClient) MapCreateBulk(slice any, setFunc func(*ChartCreate, int)) *ChartCreateBulk {
 	rv := reflect.ValueOf(slice)
 	if rv.Kind() != reflect.Slice {
-		return &PlaceholderCreateBulk{err: fmt.Errorf("calling to PlaceholderClient.MapCreateBulk with wrong type %T, need slice", slice)}
+		return &ChartCreateBulk{err: fmt.Errorf("calling to ChartClient.MapCreateBulk with wrong type %T, need slice", slice)}
 	}
-	builders := make([]*PlaceholderCreate, rv.Len())
+	builders := make([]*ChartCreate, rv.Len())
 	for i := 0; i < rv.Len(); i++ {
 		builders[i] = c.Create()
 		setFunc(builders[i], i)
 	}
-	return &PlaceholderCreateBulk{config: c.config, builders: builders}
+	return &ChartCreateBulk{config: c.config, builders: builders}
 }
 
-// Update returns an update builder for Placeholder.
-func (c *PlaceholderClient) Update() *PlaceholderUpdate {
-	mutation := newPlaceholderMutation(c.config, OpUpdate)
-	return &PlaceholderUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+// Update returns an update builder for Chart.
+func (c *ChartClient) Update() *ChartUpdate {
+	mutation := newChartMutation(c.config, OpUpdate)
+	return &ChartUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
 // UpdateOne returns an update builder for the given entity.
-func (c *PlaceholderClient) UpdateOne(_m *Placeholder) *PlaceholderUpdateOne {
-	mutation := newPlaceholderMutation(c.config, OpUpdateOne, withPlaceholder(_m))
-	return &PlaceholderUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+func (c *ChartClient) UpdateOne(_m *Chart) *ChartUpdateOne {
+	mutation := newChartMutation(c.config, OpUpdateOne, withChart(_m))
+	return &ChartUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
 // UpdateOneID returns an update builder for the given id.
-func (c *PlaceholderClient) UpdateOneID(id int64) *PlaceholderUpdateOne {
-	mutation := newPlaceholderMutation(c.config, OpUpdateOne, withPlaceholderID(id))
-	return &PlaceholderUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+func (c *ChartClient) UpdateOneID(id int64) *ChartUpdateOne {
+	mutation := newChartMutation(c.config, OpUpdateOne, withChartID(id))
+	return &ChartUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
-// Delete returns a delete builder for Placeholder.
-func (c *PlaceholderClient) Delete() *PlaceholderDelete {
-	mutation := newPlaceholderMutation(c.config, OpDelete)
-	return &PlaceholderDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+// Delete returns a delete builder for Chart.
+func (c *ChartClient) Delete() *ChartDelete {
+	mutation := newChartMutation(c.config, OpDelete)
+	return &ChartDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
 
 // DeleteOne returns a builder for deleting the given entity.
-func (c *PlaceholderClient) DeleteOne(_m *Placeholder) *PlaceholderDeleteOne {
+func (c *ChartClient) DeleteOne(_m *Chart) *ChartDeleteOne {
 	return c.DeleteOneID(_m.ID)
 }
 
 // DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *PlaceholderClient) DeleteOneID(id int64) *PlaceholderDeleteOne {
-	builder := c.Delete().Where(placeholder.ID(id))
+func (c *ChartClient) DeleteOneID(id int64) *ChartDeleteOne {
+	builder := c.Delete().Where(chart.ID(id))
 	builder.mutation.id = &id
 	builder.mutation.op = OpDeleteOne
-	return &PlaceholderDeleteOne{builder}
+	return &ChartDeleteOne{builder}
 }
 
-// Query returns a query builder for Placeholder.
-func (c *PlaceholderClient) Query() *PlaceholderQuery {
-	return &PlaceholderQuery{
+// Query returns a query builder for Chart.
+func (c *ChartClient) Query() *ChartQuery {
+	return &ChartQuery{
 		config: c.config,
-		ctx:    &QueryContext{Type: TypePlaceholder},
+		ctx:    &QueryContext{Type: TypeChart},
 		inters: c.Interceptors(),
 	}
 }
 
-// Get returns a Placeholder entity by its id.
-func (c *PlaceholderClient) Get(ctx context.Context, id int64) (*Placeholder, error) {
-	return c.Query().Where(placeholder.ID(id)).Only(ctx)
+// Get returns a Chart entity by its id.
+func (c *ChartClient) Get(ctx context.Context, id int64) (*Chart, error) {
+	return c.Query().Where(chart.ID(id)).Only(ctx)
 }
 
 // GetX is like Get, but panics if an error occurs.
-func (c *PlaceholderClient) GetX(ctx context.Context, id int64) *Placeholder {
+func (c *ChartClient) GetX(ctx context.Context, id int64) *Chart {
 	obj, err := c.Get(ctx, id)
 	if err != nil {
 		panic(err)
@@ -305,37 +316,202 @@ func (c *PlaceholderClient) GetX(ctx context.Context, id int64) *Placeholder {
 	return obj
 }
 
+// QueryOwner queries the owner edge of a Chart.
+func (c *ChartClient) QueryOwner(_m *Chart) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(chart.Table, chart.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, chart.OwnerTable, chart.OwnerColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
-func (c *PlaceholderClient) Hooks() []Hook {
-	return c.hooks.Placeholder
+func (c *ChartClient) Hooks() []Hook {
+	return c.hooks.Chart
 }
 
 // Interceptors returns the client interceptors.
-func (c *PlaceholderClient) Interceptors() []Interceptor {
-	return c.inters.Placeholder
+func (c *ChartClient) Interceptors() []Interceptor {
+	return c.inters.Chart
 }
 
-func (c *PlaceholderClient) mutate(ctx context.Context, m *PlaceholderMutation) (Value, error) {
+func (c *ChartClient) mutate(ctx context.Context, m *ChartMutation) (Value, error) {
 	switch m.Op() {
 	case OpCreate:
-		return (&PlaceholderCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+		return (&ChartCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
 	case OpUpdate:
-		return (&PlaceholderUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+		return (&ChartUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
 	case OpUpdateOne:
-		return (&PlaceholderUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+		return (&ChartUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
 	case OpDelete, OpDeleteOne:
-		return (&PlaceholderDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+		return (&ChartDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
-		return nil, fmt.Errorf("ent: unknown Placeholder mutation op: %q", m.Op())
+		return nil, fmt.Errorf("ent: unknown Chart mutation op: %q", m.Op())
+	}
+}
+
+// UserClient is a client for the User schema.
+type UserClient struct {
+	config
+}
+
+// NewUserClient returns a client for the User from the given config.
+func NewUserClient(c config) *UserClient {
+	return &UserClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `user.Hooks(f(g(h())))`.
+func (c *UserClient) Use(hooks ...Hook) {
+	c.hooks.User = append(c.hooks.User, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `user.Intercept(f(g(h())))`.
+func (c *UserClient) Intercept(interceptors ...Interceptor) {
+	c.inters.User = append(c.inters.User, interceptors...)
+}
+
+// Create returns a builder for creating a User entity.
+func (c *UserClient) Create() *UserCreate {
+	mutation := newUserMutation(c.config, OpCreate)
+	return &UserCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of User entities.
+func (c *UserClient) CreateBulk(builders ...*UserCreate) *UserCreateBulk {
+	return &UserCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserClient) MapCreateBulk(slice any, setFunc func(*UserCreate, int)) *UserCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserCreateBulk{err: fmt.Errorf("calling to UserClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for User.
+func (c *UserClient) Update() *UserUpdate {
+	mutation := newUserMutation(c.config, OpUpdate)
+	return &UserUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserClient) UpdateOne(_m *User) *UserUpdateOne {
+	mutation := newUserMutation(c.config, OpUpdateOne, withUser(_m))
+	return &UserUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserClient) UpdateOneID(id int64) *UserUpdateOne {
+	mutation := newUserMutation(c.config, OpUpdateOne, withUserID(id))
+	return &UserUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for User.
+func (c *UserClient) Delete() *UserDelete {
+	mutation := newUserMutation(c.config, OpDelete)
+	return &UserDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserClient) DeleteOne(_m *User) *UserDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserClient) DeleteOneID(id int64) *UserDeleteOne {
+	builder := c.Delete().Where(user.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserDeleteOne{builder}
+}
+
+// Query returns a query builder for User.
+func (c *UserClient) Query() *UserQuery {
+	return &UserQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUser},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a User entity by its id.
+func (c *UserClient) Get(ctx context.Context, id int64) (*User, error) {
+	return c.Query().Where(user.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserClient) GetX(ctx context.Context, id int64) *User {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryCharts queries the charts edge of a User.
+func (c *UserClient) QueryCharts(_m *User) *ChartQuery {
+	query := (&ChartClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(chart.Table, chart.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.ChartsTable, user.ChartsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UserClient) Hooks() []Hook {
+	return c.hooks.User
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserClient) Interceptors() []Interceptor {
+	return c.inters.User
+}
+
+func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown User mutation op: %q", m.Op())
 	}
 }
 
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		Placeholder []ent.Hook
+		Chart, User []ent.Hook
 	}
 	inters struct {
-		Placeholder []ent.Interceptor
+		Chart, User []ent.Interceptor
 	}
 )

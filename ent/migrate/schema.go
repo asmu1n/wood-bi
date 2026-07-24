@@ -8,21 +8,80 @@ import (
 )
 
 var (
-	// PlaceholdersColumns holds the columns for the "placeholders" table.
-	PlaceholdersColumns = []*schema.Column{
+	// ChartsColumns holds the columns for the "charts" table.
+	ChartsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "name", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "goal", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "chart_data", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "chart_type", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "gen_chart", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "gen_result", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "status", Type: field.TypeString, Size: 32, Default: "wait"},
+		{Name: "exec_message", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "user_id", Type: field.TypeInt64},
 	}
-	// PlaceholdersTable holds the schema information for the "placeholders" table.
-	PlaceholdersTable = &schema.Table{
-		Name:       "placeholders",
-		Columns:    PlaceholdersColumns,
-		PrimaryKey: []*schema.Column{PlaceholdersColumns[0]},
+	// ChartsTable holds the schema information for the "charts" table.
+	ChartsTable = &schema.Table{
+		Name:       "charts",
+		Columns:    ChartsColumns,
+		PrimaryKey: []*schema.Column{ChartsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "charts_users_charts",
+				Columns:    []*schema.Column{ChartsColumns[12]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "chart_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ChartsColumns[12], ChartsColumns[9]},
+			},
+			{
+				Name:    "chart_status",
+				Unique:  false,
+				Columns: []*schema.Column{ChartsColumns[7]},
+			},
+		},
+	}
+	// UsersColumns holds the columns for the "users" table.
+	UsersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "account", Type: field.TypeString, Unique: true, Size: 256},
+		{Name: "password_hash", Type: field.TypeString, Size: 512},
+		{Name: "name", Type: field.TypeString, Nullable: true, Size: 256},
+		{Name: "avatar", Type: field.TypeString, Nullable: true, Size: 1024},
+		{Name: "role", Type: field.TypeString, Size: 32, Default: "user"},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+	}
+	// UsersTable holds the schema information for the "users" table.
+	UsersTable = &schema.Table{
+		Name:       "users",
+		Columns:    UsersColumns,
+		PrimaryKey: []*schema.Column{UsersColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "user_account",
+				Unique:  false,
+				Columns: []*schema.Column{UsersColumns[1]},
+			},
+		},
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
-		PlaceholdersTable,
+		ChartsTable,
+		UsersTable,
 	}
 )
 
 func init() {
+	ChartsTable.ForeignKeys[0].RefTable = UsersTable
 }

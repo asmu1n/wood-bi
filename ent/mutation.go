@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
+	"wood-bi/ent/chart"
 	"wood-bi/ent/predicate"
+	"wood-bi/ent/user"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -22,32 +25,46 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypePlaceholder = "Placeholder"
+	TypeChart = "Chart"
+	TypeUser  = "User"
 )
 
-// PlaceholderMutation represents an operation that mutates the Placeholder nodes in the graph.
-type PlaceholderMutation struct {
+// ChartMutation represents an operation that mutates the Chart nodes in the graph.
+type ChartMutation struct {
 	config
 	op            Op
 	typ           string
 	id            *int64
+	name          *string
+	goal          *string
+	chart_data    *string
+	chart_type    *string
+	gen_chart     *string
+	gen_result    *string
+	status        *string
+	exec_message  *string
+	created_at    *time.Time
+	updated_at    *time.Time
+	deleted_at    *time.Time
 	clearedFields map[string]struct{}
+	owner         *int64
+	clearedowner  bool
 	done          bool
-	oldValue      func(context.Context) (*Placeholder, error)
-	predicates    []predicate.Placeholder
+	oldValue      func(context.Context) (*Chart, error)
+	predicates    []predicate.Chart
 }
 
-var _ ent.Mutation = (*PlaceholderMutation)(nil)
+var _ ent.Mutation = (*ChartMutation)(nil)
 
-// placeholderOption allows management of the mutation configuration using functional options.
-type placeholderOption func(*PlaceholderMutation)
+// chartOption allows management of the mutation configuration using functional options.
+type chartOption func(*ChartMutation)
 
-// newPlaceholderMutation creates new mutation for the Placeholder entity.
-func newPlaceholderMutation(c config, op Op, opts ...placeholderOption) *PlaceholderMutation {
-	m := &PlaceholderMutation{
+// newChartMutation creates new mutation for the Chart entity.
+func newChartMutation(c config, op Op, opts ...chartOption) *ChartMutation {
+	m := &ChartMutation{
 		config:        c,
 		op:            op,
-		typ:           TypePlaceholder,
+		typ:           TypeChart,
 		clearedFields: make(map[string]struct{}),
 	}
 	for _, opt := range opts {
@@ -56,20 +73,20 @@ func newPlaceholderMutation(c config, op Op, opts ...placeholderOption) *Placeho
 	return m
 }
 
-// withPlaceholderID sets the ID field of the mutation.
-func withPlaceholderID(id int64) placeholderOption {
-	return func(m *PlaceholderMutation) {
+// withChartID sets the ID field of the mutation.
+func withChartID(id int64) chartOption {
+	return func(m *ChartMutation) {
 		var (
 			err   error
 			once  sync.Once
-			value *Placeholder
+			value *Chart
 		)
-		m.oldValue = func(ctx context.Context) (*Placeholder, error) {
+		m.oldValue = func(ctx context.Context) (*Chart, error) {
 			once.Do(func() {
 				if m.done {
 					err = errors.New("querying old values post mutation is not allowed")
 				} else {
-					value, err = m.Client().Placeholder.Get(ctx, id)
+					value, err = m.Client().Chart.Get(ctx, id)
 				}
 			})
 			return value, err
@@ -78,10 +95,10 @@ func withPlaceholderID(id int64) placeholderOption {
 	}
 }
 
-// withPlaceholder sets the old Placeholder of the mutation.
-func withPlaceholder(node *Placeholder) placeholderOption {
-	return func(m *PlaceholderMutation) {
-		m.oldValue = func(context.Context) (*Placeholder, error) {
+// withChart sets the old Chart of the mutation.
+func withChart(node *Chart) chartOption {
+	return func(m *ChartMutation) {
+		m.oldValue = func(context.Context) (*Chart, error) {
 			return node, nil
 		}
 		m.id = &node.ID
@@ -90,7 +107,7 @@ func withPlaceholder(node *Placeholder) placeholderOption {
 
 // Client returns a new `ent.Client` from the mutation. If the mutation was
 // executed in a transaction (ent.Tx), a transactional client is returned.
-func (m PlaceholderMutation) Client() *Client {
+func (m ChartMutation) Client() *Client {
 	client := &Client{config: m.config}
 	client.init()
 	return client
@@ -98,7 +115,7 @@ func (m PlaceholderMutation) Client() *Client {
 
 // Tx returns an `ent.Tx` for mutations that were executed in transactions;
 // it returns an error otherwise.
-func (m PlaceholderMutation) Tx() (*Tx, error) {
+func (m ChartMutation) Tx() (*Tx, error) {
 	if _, ok := m.driver.(*txDriver); !ok {
 		return nil, errors.New("ent: mutation is not running in a transaction")
 	}
@@ -108,14 +125,14 @@ func (m PlaceholderMutation) Tx() (*Tx, error) {
 }
 
 // SetID sets the value of the id field. Note that this
-// operation is only accepted on creation of Placeholder entities.
-func (m *PlaceholderMutation) SetID(id int64) {
+// operation is only accepted on creation of Chart entities.
+func (m *ChartMutation) SetID(id int64) {
 	m.id = &id
 }
 
 // ID returns the ID value in the mutation. Note that the ID is only available
 // if it was provided to the builder or after it was returned from the database.
-func (m *PlaceholderMutation) ID() (id int64, exists bool) {
+func (m *ChartMutation) ID() (id int64, exists bool) {
 	if m.id == nil {
 		return
 	}
@@ -126,7 +143,7 @@ func (m *PlaceholderMutation) ID() (id int64, exists bool) {
 // That means, if the mutation is applied within a transaction with an isolation level such
 // as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
 // or updated by the mutation.
-func (m *PlaceholderMutation) IDs(ctx context.Context) ([]int64, error) {
+func (m *ChartMutation) IDs(ctx context.Context) ([]int64, error) {
 	switch {
 	case m.op.Is(OpUpdateOne | OpDeleteOne):
 		id, exists := m.ID()
@@ -135,21 +152,597 @@ func (m *PlaceholderMutation) IDs(ctx context.Context) ([]int64, error) {
 		}
 		fallthrough
 	case m.op.Is(OpUpdate | OpDelete):
-		return m.Client().Placeholder.Query().Where(m.predicates...).IDs(ctx)
+		return m.Client().Chart.Query().Where(m.predicates...).IDs(ctx)
 	default:
 		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
 	}
 }
 
-// Where appends a list predicates to the PlaceholderMutation builder.
-func (m *PlaceholderMutation) Where(ps ...predicate.Placeholder) {
+// SetName sets the "name" field.
+func (m *ChartMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *ChartMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldName(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ClearName clears the value of the "name" field.
+func (m *ChartMutation) ClearName() {
+	m.name = nil
+	m.clearedFields[chart.FieldName] = struct{}{}
+}
+
+// NameCleared returns if the "name" field was cleared in this mutation.
+func (m *ChartMutation) NameCleared() bool {
+	_, ok := m.clearedFields[chart.FieldName]
+	return ok
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *ChartMutation) ResetName() {
+	m.name = nil
+	delete(m.clearedFields, chart.FieldName)
+}
+
+// SetGoal sets the "goal" field.
+func (m *ChartMutation) SetGoal(s string) {
+	m.goal = &s
+}
+
+// Goal returns the value of the "goal" field in the mutation.
+func (m *ChartMutation) Goal() (r string, exists bool) {
+	v := m.goal
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGoal returns the old "goal" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldGoal(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGoal is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGoal requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGoal: %w", err)
+	}
+	return oldValue.Goal, nil
+}
+
+// ClearGoal clears the value of the "goal" field.
+func (m *ChartMutation) ClearGoal() {
+	m.goal = nil
+	m.clearedFields[chart.FieldGoal] = struct{}{}
+}
+
+// GoalCleared returns if the "goal" field was cleared in this mutation.
+func (m *ChartMutation) GoalCleared() bool {
+	_, ok := m.clearedFields[chart.FieldGoal]
+	return ok
+}
+
+// ResetGoal resets all changes to the "goal" field.
+func (m *ChartMutation) ResetGoal() {
+	m.goal = nil
+	delete(m.clearedFields, chart.FieldGoal)
+}
+
+// SetChartData sets the "chart_data" field.
+func (m *ChartMutation) SetChartData(s string) {
+	m.chart_data = &s
+}
+
+// ChartData returns the value of the "chart_data" field in the mutation.
+func (m *ChartMutation) ChartData() (r string, exists bool) {
+	v := m.chart_data
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldChartData returns the old "chart_data" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldChartData(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldChartData is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldChartData requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldChartData: %w", err)
+	}
+	return oldValue.ChartData, nil
+}
+
+// ClearChartData clears the value of the "chart_data" field.
+func (m *ChartMutation) ClearChartData() {
+	m.chart_data = nil
+	m.clearedFields[chart.FieldChartData] = struct{}{}
+}
+
+// ChartDataCleared returns if the "chart_data" field was cleared in this mutation.
+func (m *ChartMutation) ChartDataCleared() bool {
+	_, ok := m.clearedFields[chart.FieldChartData]
+	return ok
+}
+
+// ResetChartData resets all changes to the "chart_data" field.
+func (m *ChartMutation) ResetChartData() {
+	m.chart_data = nil
+	delete(m.clearedFields, chart.FieldChartData)
+}
+
+// SetChartType sets the "chart_type" field.
+func (m *ChartMutation) SetChartType(s string) {
+	m.chart_type = &s
+}
+
+// ChartType returns the value of the "chart_type" field in the mutation.
+func (m *ChartMutation) ChartType() (r string, exists bool) {
+	v := m.chart_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldChartType returns the old "chart_type" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldChartType(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldChartType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldChartType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldChartType: %w", err)
+	}
+	return oldValue.ChartType, nil
+}
+
+// ClearChartType clears the value of the "chart_type" field.
+func (m *ChartMutation) ClearChartType() {
+	m.chart_type = nil
+	m.clearedFields[chart.FieldChartType] = struct{}{}
+}
+
+// ChartTypeCleared returns if the "chart_type" field was cleared in this mutation.
+func (m *ChartMutation) ChartTypeCleared() bool {
+	_, ok := m.clearedFields[chart.FieldChartType]
+	return ok
+}
+
+// ResetChartType resets all changes to the "chart_type" field.
+func (m *ChartMutation) ResetChartType() {
+	m.chart_type = nil
+	delete(m.clearedFields, chart.FieldChartType)
+}
+
+// SetGenChart sets the "gen_chart" field.
+func (m *ChartMutation) SetGenChart(s string) {
+	m.gen_chart = &s
+}
+
+// GenChart returns the value of the "gen_chart" field in the mutation.
+func (m *ChartMutation) GenChart() (r string, exists bool) {
+	v := m.gen_chart
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGenChart returns the old "gen_chart" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldGenChart(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGenChart is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGenChart requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGenChart: %w", err)
+	}
+	return oldValue.GenChart, nil
+}
+
+// ClearGenChart clears the value of the "gen_chart" field.
+func (m *ChartMutation) ClearGenChart() {
+	m.gen_chart = nil
+	m.clearedFields[chart.FieldGenChart] = struct{}{}
+}
+
+// GenChartCleared returns if the "gen_chart" field was cleared in this mutation.
+func (m *ChartMutation) GenChartCleared() bool {
+	_, ok := m.clearedFields[chart.FieldGenChart]
+	return ok
+}
+
+// ResetGenChart resets all changes to the "gen_chart" field.
+func (m *ChartMutation) ResetGenChart() {
+	m.gen_chart = nil
+	delete(m.clearedFields, chart.FieldGenChart)
+}
+
+// SetGenResult sets the "gen_result" field.
+func (m *ChartMutation) SetGenResult(s string) {
+	m.gen_result = &s
+}
+
+// GenResult returns the value of the "gen_result" field in the mutation.
+func (m *ChartMutation) GenResult() (r string, exists bool) {
+	v := m.gen_result
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGenResult returns the old "gen_result" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldGenResult(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGenResult is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGenResult requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGenResult: %w", err)
+	}
+	return oldValue.GenResult, nil
+}
+
+// ClearGenResult clears the value of the "gen_result" field.
+func (m *ChartMutation) ClearGenResult() {
+	m.gen_result = nil
+	m.clearedFields[chart.FieldGenResult] = struct{}{}
+}
+
+// GenResultCleared returns if the "gen_result" field was cleared in this mutation.
+func (m *ChartMutation) GenResultCleared() bool {
+	_, ok := m.clearedFields[chart.FieldGenResult]
+	return ok
+}
+
+// ResetGenResult resets all changes to the "gen_result" field.
+func (m *ChartMutation) ResetGenResult() {
+	m.gen_result = nil
+	delete(m.clearedFields, chart.FieldGenResult)
+}
+
+// SetStatus sets the "status" field.
+func (m *ChartMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *ChartMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *ChartMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetExecMessage sets the "exec_message" field.
+func (m *ChartMutation) SetExecMessage(s string) {
+	m.exec_message = &s
+}
+
+// ExecMessage returns the value of the "exec_message" field in the mutation.
+func (m *ChartMutation) ExecMessage() (r string, exists bool) {
+	v := m.exec_message
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExecMessage returns the old "exec_message" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldExecMessage(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExecMessage is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExecMessage requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExecMessage: %w", err)
+	}
+	return oldValue.ExecMessage, nil
+}
+
+// ClearExecMessage clears the value of the "exec_message" field.
+func (m *ChartMutation) ClearExecMessage() {
+	m.exec_message = nil
+	m.clearedFields[chart.FieldExecMessage] = struct{}{}
+}
+
+// ExecMessageCleared returns if the "exec_message" field was cleared in this mutation.
+func (m *ChartMutation) ExecMessageCleared() bool {
+	_, ok := m.clearedFields[chart.FieldExecMessage]
+	return ok
+}
+
+// ResetExecMessage resets all changes to the "exec_message" field.
+func (m *ChartMutation) ResetExecMessage() {
+	m.exec_message = nil
+	delete(m.clearedFields, chart.FieldExecMessage)
+}
+
+// SetUserID sets the "user_id" field.
+func (m *ChartMutation) SetUserID(i int64) {
+	m.owner = &i
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *ChartMutation) UserID() (r int64, exists bool) {
+	v := m.owner
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *ChartMutation) ResetUserID() {
+	m.owner = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *ChartMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *ChartMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *ChartMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *ChartMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *ChartMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *ChartMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *ChartMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *ChartMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the Chart entity.
+// If the Chart object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChartMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *ChartMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[chart.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *ChartMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[chart.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *ChartMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, chart.FieldDeletedAt)
+}
+
+// SetOwnerID sets the "owner" edge to the User entity by id.
+func (m *ChartMutation) SetOwnerID(id int64) {
+	m.owner = &id
+}
+
+// ClearOwner clears the "owner" edge to the User entity.
+func (m *ChartMutation) ClearOwner() {
+	m.clearedowner = true
+	m.clearedFields[chart.FieldUserID] = struct{}{}
+}
+
+// OwnerCleared reports if the "owner" edge to the User entity was cleared.
+func (m *ChartMutation) OwnerCleared() bool {
+	return m.clearedowner
+}
+
+// OwnerID returns the "owner" edge ID in the mutation.
+func (m *ChartMutation) OwnerID() (id int64, exists bool) {
+	if m.owner != nil {
+		return *m.owner, true
+	}
+	return
+}
+
+// OwnerIDs returns the "owner" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// OwnerID instead. It exists only for internal usage by the builders.
+func (m *ChartMutation) OwnerIDs() (ids []int64) {
+	if id := m.owner; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetOwner resets all changes to the "owner" edge.
+func (m *ChartMutation) ResetOwner() {
+	m.owner = nil
+	m.clearedowner = false
+}
+
+// Where appends a list predicates to the ChartMutation builder.
+func (m *ChartMutation) Where(ps ...predicate.Chart) {
 	m.predicates = append(m.predicates, ps...)
 }
 
-// WhereP appends storage-level predicates to the PlaceholderMutation builder. Using this method,
+// WhereP appends storage-level predicates to the ChartMutation builder. Using this method,
 // users can use type-assertion to append predicates that do not depend on any generated package.
-func (m *PlaceholderMutation) WhereP(ps ...func(*sql.Selector)) {
-	p := make([]predicate.Placeholder, len(ps))
+func (m *ChartMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Chart, len(ps))
 	for i := range ps {
 		p[i] = ps[i]
 	}
@@ -157,140 +750,1295 @@ func (m *PlaceholderMutation) WhereP(ps ...func(*sql.Selector)) {
 }
 
 // Op returns the operation name.
-func (m *PlaceholderMutation) Op() Op {
+func (m *ChartMutation) Op() Op {
 	return m.op
 }
 
 // SetOp allows setting the mutation operation.
-func (m *PlaceholderMutation) SetOp(op Op) {
+func (m *ChartMutation) SetOp(op Op) {
 	m.op = op
 }
 
-// Type returns the node type of this mutation (Placeholder).
-func (m *PlaceholderMutation) Type() string {
+// Type returns the node type of this mutation (Chart).
+func (m *ChartMutation) Type() string {
 	return m.typ
 }
 
 // Fields returns all fields that were changed during this mutation. Note that in
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
-func (m *PlaceholderMutation) Fields() []string {
-	fields := make([]string, 0, 0)
+func (m *ChartMutation) Fields() []string {
+	fields := make([]string, 0, 12)
+	if m.name != nil {
+		fields = append(fields, chart.FieldName)
+	}
+	if m.goal != nil {
+		fields = append(fields, chart.FieldGoal)
+	}
+	if m.chart_data != nil {
+		fields = append(fields, chart.FieldChartData)
+	}
+	if m.chart_type != nil {
+		fields = append(fields, chart.FieldChartType)
+	}
+	if m.gen_chart != nil {
+		fields = append(fields, chart.FieldGenChart)
+	}
+	if m.gen_result != nil {
+		fields = append(fields, chart.FieldGenResult)
+	}
+	if m.status != nil {
+		fields = append(fields, chart.FieldStatus)
+	}
+	if m.exec_message != nil {
+		fields = append(fields, chart.FieldExecMessage)
+	}
+	if m.owner != nil {
+		fields = append(fields, chart.FieldUserID)
+	}
+	if m.created_at != nil {
+		fields = append(fields, chart.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, chart.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, chart.FieldDeletedAt)
+	}
 	return fields
 }
 
 // Field returns the value of a field with the given name. The second boolean
 // return value indicates that this field was not set, or was not defined in the
 // schema.
-func (m *PlaceholderMutation) Field(name string) (ent.Value, bool) {
+func (m *ChartMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case chart.FieldName:
+		return m.Name()
+	case chart.FieldGoal:
+		return m.Goal()
+	case chart.FieldChartData:
+		return m.ChartData()
+	case chart.FieldChartType:
+		return m.ChartType()
+	case chart.FieldGenChart:
+		return m.GenChart()
+	case chart.FieldGenResult:
+		return m.GenResult()
+	case chart.FieldStatus:
+		return m.Status()
+	case chart.FieldExecMessage:
+		return m.ExecMessage()
+	case chart.FieldUserID:
+		return m.UserID()
+	case chart.FieldCreatedAt:
+		return m.CreatedAt()
+	case chart.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case chart.FieldDeletedAt:
+		return m.DeletedAt()
+	}
 	return nil, false
 }
 
 // OldField returns the old value of the field from the database. An error is
 // returned if the mutation operation is not UpdateOne, or the query to the
 // database failed.
-func (m *PlaceholderMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
-	return nil, fmt.Errorf("unknown Placeholder field %s", name)
+func (m *ChartMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case chart.FieldName:
+		return m.OldName(ctx)
+	case chart.FieldGoal:
+		return m.OldGoal(ctx)
+	case chart.FieldChartData:
+		return m.OldChartData(ctx)
+	case chart.FieldChartType:
+		return m.OldChartType(ctx)
+	case chart.FieldGenChart:
+		return m.OldGenChart(ctx)
+	case chart.FieldGenResult:
+		return m.OldGenResult(ctx)
+	case chart.FieldStatus:
+		return m.OldStatus(ctx)
+	case chart.FieldExecMessage:
+		return m.OldExecMessage(ctx)
+	case chart.FieldUserID:
+		return m.OldUserID(ctx)
+	case chart.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case chart.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case chart.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown Chart field %s", name)
 }
 
 // SetField sets the value of a field with the given name. It returns an error if
 // the field is not defined in the schema, or if the type mismatched the field
 // type.
-func (m *PlaceholderMutation) SetField(name string, value ent.Value) error {
+func (m *ChartMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case chart.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case chart.FieldGoal:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGoal(v)
+		return nil
+	case chart.FieldChartData:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetChartData(v)
+		return nil
+	case chart.FieldChartType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetChartType(v)
+		return nil
+	case chart.FieldGenChart:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGenChart(v)
+		return nil
+	case chart.FieldGenResult:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGenResult(v)
+		return nil
+	case chart.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case chart.FieldExecMessage:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExecMessage(v)
+		return nil
+	case chart.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case chart.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case chart.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case chart.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
 	}
-	return fmt.Errorf("unknown Placeholder field %s", name)
+	return fmt.Errorf("unknown Chart field %s", name)
 }
 
 // AddedFields returns all numeric fields that were incremented/decremented during
 // this mutation.
-func (m *PlaceholderMutation) AddedFields() []string {
-	return nil
+func (m *ChartMutation) AddedFields() []string {
+	var fields []string
+	return fields
 }
 
 // AddedField returns the numeric value that was incremented/decremented on a field
 // with the given name. The second boolean return value indicates that this field
 // was not set, or was not defined in the schema.
-func (m *PlaceholderMutation) AddedField(name string) (ent.Value, bool) {
+func (m *ChartMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
 	return nil, false
 }
 
 // AddField adds the value to the field with the given name. It returns an error if
 // the field is not defined in the schema, or if the type mismatched the field
 // type.
-func (m *PlaceholderMutation) AddField(name string, value ent.Value) error {
-	return fmt.Errorf("unknown Placeholder numeric field %s", name)
+func (m *ChartMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown Chart numeric field %s", name)
 }
 
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
-func (m *PlaceholderMutation) ClearedFields() []string {
-	return nil
+func (m *ChartMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(chart.FieldName) {
+		fields = append(fields, chart.FieldName)
+	}
+	if m.FieldCleared(chart.FieldGoal) {
+		fields = append(fields, chart.FieldGoal)
+	}
+	if m.FieldCleared(chart.FieldChartData) {
+		fields = append(fields, chart.FieldChartData)
+	}
+	if m.FieldCleared(chart.FieldChartType) {
+		fields = append(fields, chart.FieldChartType)
+	}
+	if m.FieldCleared(chart.FieldGenChart) {
+		fields = append(fields, chart.FieldGenChart)
+	}
+	if m.FieldCleared(chart.FieldGenResult) {
+		fields = append(fields, chart.FieldGenResult)
+	}
+	if m.FieldCleared(chart.FieldExecMessage) {
+		fields = append(fields, chart.FieldExecMessage)
+	}
+	if m.FieldCleared(chart.FieldDeletedAt) {
+		fields = append(fields, chart.FieldDeletedAt)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
 // cleared in this mutation.
-func (m *PlaceholderMutation) FieldCleared(name string) bool {
+func (m *ChartMutation) FieldCleared(name string) bool {
 	_, ok := m.clearedFields[name]
 	return ok
 }
 
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
-func (m *PlaceholderMutation) ClearField(name string) error {
-	return fmt.Errorf("unknown Placeholder nullable field %s", name)
+func (m *ChartMutation) ClearField(name string) error {
+	switch name {
+	case chart.FieldName:
+		m.ClearName()
+		return nil
+	case chart.FieldGoal:
+		m.ClearGoal()
+		return nil
+	case chart.FieldChartData:
+		m.ClearChartData()
+		return nil
+	case chart.FieldChartType:
+		m.ClearChartType()
+		return nil
+	case chart.FieldGenChart:
+		m.ClearGenChart()
+		return nil
+	case chart.FieldGenResult:
+		m.ClearGenResult()
+		return nil
+	case chart.FieldExecMessage:
+		m.ClearExecMessage()
+		return nil
+	case chart.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown Chart nullable field %s", name)
 }
 
 // ResetField resets all changes in the mutation for the field with the given name.
 // It returns an error if the field is not defined in the schema.
-func (m *PlaceholderMutation) ResetField(name string) error {
-	return fmt.Errorf("unknown Placeholder field %s", name)
+func (m *ChartMutation) ResetField(name string) error {
+	switch name {
+	case chart.FieldName:
+		m.ResetName()
+		return nil
+	case chart.FieldGoal:
+		m.ResetGoal()
+		return nil
+	case chart.FieldChartData:
+		m.ResetChartData()
+		return nil
+	case chart.FieldChartType:
+		m.ResetChartType()
+		return nil
+	case chart.FieldGenChart:
+		m.ResetGenChart()
+		return nil
+	case chart.FieldGenResult:
+		m.ResetGenResult()
+		return nil
+	case chart.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case chart.FieldExecMessage:
+		m.ResetExecMessage()
+		return nil
+	case chart.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case chart.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case chart.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case chart.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown Chart field %s", name)
 }
 
 // AddedEdges returns all edge names that were set/added in this mutation.
-func (m *PlaceholderMutation) AddedEdges() []string {
-	edges := make([]string, 0, 0)
+func (m *ChartMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.owner != nil {
+		edges = append(edges, chart.EdgeOwner)
+	}
 	return edges
 }
 
 // AddedIDs returns all IDs (to other nodes) that were added for the given edge
 // name in this mutation.
-func (m *PlaceholderMutation) AddedIDs(name string) []ent.Value {
+func (m *ChartMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case chart.EdgeOwner:
+		if id := m.owner; id != nil {
+			return []ent.Value{*id}
+		}
+	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
-func (m *PlaceholderMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 0)
+func (m *ChartMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
 	return edges
 }
 
 // RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
 // the given name in this mutation.
-func (m *PlaceholderMutation) RemovedIDs(name string) []ent.Value {
+func (m *ChartMutation) RemovedIDs(name string) []ent.Value {
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
-func (m *PlaceholderMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 0)
+func (m *ChartMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedowner {
+		edges = append(edges, chart.EdgeOwner)
+	}
 	return edges
 }
 
 // EdgeCleared returns a boolean which indicates if the edge with the given name
 // was cleared in this mutation.
-func (m *PlaceholderMutation) EdgeCleared(name string) bool {
+func (m *ChartMutation) EdgeCleared(name string) bool {
+	switch name {
+	case chart.EdgeOwner:
+		return m.clearedowner
+	}
 	return false
 }
 
 // ClearEdge clears the value of the edge with the given name. It returns an error
 // if that edge is not defined in the schema.
-func (m *PlaceholderMutation) ClearEdge(name string) error {
-	return fmt.Errorf("unknown Placeholder unique edge %s", name)
+func (m *ChartMutation) ClearEdge(name string) error {
+	switch name {
+	case chart.EdgeOwner:
+		m.ClearOwner()
+		return nil
+	}
+	return fmt.Errorf("unknown Chart unique edge %s", name)
 }
 
 // ResetEdge resets all changes to the edge with the given name in this mutation.
 // It returns an error if the edge is not defined in the schema.
-func (m *PlaceholderMutation) ResetEdge(name string) error {
-	return fmt.Errorf("unknown Placeholder edge %s", name)
+func (m *ChartMutation) ResetEdge(name string) error {
+	switch name {
+	case chart.EdgeOwner:
+		m.ResetOwner()
+		return nil
+	}
+	return fmt.Errorf("unknown Chart edge %s", name)
+}
+
+// UserMutation represents an operation that mutates the User nodes in the graph.
+type UserMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *int64
+	account       *string
+	password_hash *string
+	name          *string
+	avatar        *string
+	role          *string
+	created_at    *time.Time
+	updated_at    *time.Time
+	deleted_at    *time.Time
+	clearedFields map[string]struct{}
+	charts        map[int64]struct{}
+	removedcharts map[int64]struct{}
+	clearedcharts bool
+	done          bool
+	oldValue      func(context.Context) (*User, error)
+	predicates    []predicate.User
+}
+
+var _ ent.Mutation = (*UserMutation)(nil)
+
+// userOption allows management of the mutation configuration using functional options.
+type userOption func(*UserMutation)
+
+// newUserMutation creates new mutation for the User entity.
+func newUserMutation(c config, op Op, opts ...userOption) *UserMutation {
+	m := &UserMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUser,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUserID sets the ID field of the mutation.
+func withUserID(id int64) userOption {
+	return func(m *UserMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *User
+		)
+		m.oldValue = func(ctx context.Context) (*User, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().User.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUser sets the old User of the mutation.
+func withUser(node *User) userOption {
+	return func(m *UserMutation) {
+		m.oldValue = func(context.Context) (*User, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UserMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UserMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of User entities.
+func (m *UserMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UserMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UserMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().User.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetAccount sets the "account" field.
+func (m *UserMutation) SetAccount(s string) {
+	m.account = &s
+}
+
+// Account returns the value of the "account" field in the mutation.
+func (m *UserMutation) Account() (r string, exists bool) {
+	v := m.account
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccount returns the old "account" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldAccount(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccount: %w", err)
+	}
+	return oldValue.Account, nil
+}
+
+// ResetAccount resets all changes to the "account" field.
+func (m *UserMutation) ResetAccount() {
+	m.account = nil
+}
+
+// SetPasswordHash sets the "password_hash" field.
+func (m *UserMutation) SetPasswordHash(s string) {
+	m.password_hash = &s
+}
+
+// PasswordHash returns the value of the "password_hash" field in the mutation.
+func (m *UserMutation) PasswordHash() (r string, exists bool) {
+	v := m.password_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPasswordHash returns the old "password_hash" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldPasswordHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPasswordHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPasswordHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPasswordHash: %w", err)
+	}
+	return oldValue.PasswordHash, nil
+}
+
+// ResetPasswordHash resets all changes to the "password_hash" field.
+func (m *UserMutation) ResetPasswordHash() {
+	m.password_hash = nil
+}
+
+// SetName sets the "name" field.
+func (m *UserMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *UserMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldName(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ClearName clears the value of the "name" field.
+func (m *UserMutation) ClearName() {
+	m.name = nil
+	m.clearedFields[user.FieldName] = struct{}{}
+}
+
+// NameCleared returns if the "name" field was cleared in this mutation.
+func (m *UserMutation) NameCleared() bool {
+	_, ok := m.clearedFields[user.FieldName]
+	return ok
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *UserMutation) ResetName() {
+	m.name = nil
+	delete(m.clearedFields, user.FieldName)
+}
+
+// SetAvatar sets the "avatar" field.
+func (m *UserMutation) SetAvatar(s string) {
+	m.avatar = &s
+}
+
+// Avatar returns the value of the "avatar" field in the mutation.
+func (m *UserMutation) Avatar() (r string, exists bool) {
+	v := m.avatar
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAvatar returns the old "avatar" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldAvatar(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAvatar is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAvatar requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAvatar: %w", err)
+	}
+	return oldValue.Avatar, nil
+}
+
+// ClearAvatar clears the value of the "avatar" field.
+func (m *UserMutation) ClearAvatar() {
+	m.avatar = nil
+	m.clearedFields[user.FieldAvatar] = struct{}{}
+}
+
+// AvatarCleared returns if the "avatar" field was cleared in this mutation.
+func (m *UserMutation) AvatarCleared() bool {
+	_, ok := m.clearedFields[user.FieldAvatar]
+	return ok
+}
+
+// ResetAvatar resets all changes to the "avatar" field.
+func (m *UserMutation) ResetAvatar() {
+	m.avatar = nil
+	delete(m.clearedFields, user.FieldAvatar)
+}
+
+// SetRole sets the "role" field.
+func (m *UserMutation) SetRole(s string) {
+	m.role = &s
+}
+
+// Role returns the value of the "role" field in the mutation.
+func (m *UserMutation) Role() (r string, exists bool) {
+	v := m.role
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRole returns the old "role" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldRole(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRole is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRole requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRole: %w", err)
+	}
+	return oldValue.Role, nil
+}
+
+// ResetRole resets all changes to the "role" field.
+func (m *UserMutation) ResetRole() {
+	m.role = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UserMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UserMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UserMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UserMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UserMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UserMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *UserMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *UserMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *UserMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[user.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *UserMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[user.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *UserMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, user.FieldDeletedAt)
+}
+
+// AddChartIDs adds the "charts" edge to the Chart entity by ids.
+func (m *UserMutation) AddChartIDs(ids ...int64) {
+	if m.charts == nil {
+		m.charts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.charts[ids[i]] = struct{}{}
+	}
+}
+
+// ClearCharts clears the "charts" edge to the Chart entity.
+func (m *UserMutation) ClearCharts() {
+	m.clearedcharts = true
+}
+
+// ChartsCleared reports if the "charts" edge to the Chart entity was cleared.
+func (m *UserMutation) ChartsCleared() bool {
+	return m.clearedcharts
+}
+
+// RemoveChartIDs removes the "charts" edge to the Chart entity by IDs.
+func (m *UserMutation) RemoveChartIDs(ids ...int64) {
+	if m.removedcharts == nil {
+		m.removedcharts = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.charts, ids[i])
+		m.removedcharts[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedCharts returns the removed IDs of the "charts" edge to the Chart entity.
+func (m *UserMutation) RemovedChartsIDs() (ids []int64) {
+	for id := range m.removedcharts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ChartsIDs returns the "charts" edge IDs in the mutation.
+func (m *UserMutation) ChartsIDs() (ids []int64) {
+	for id := range m.charts {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetCharts resets all changes to the "charts" edge.
+func (m *UserMutation) ResetCharts() {
+	m.charts = nil
+	m.clearedcharts = false
+	m.removedcharts = nil
+}
+
+// Where appends a list predicates to the UserMutation builder.
+func (m *UserMutation) Where(ps ...predicate.User) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UserMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UserMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.User, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UserMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UserMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (User).
+func (m *UserMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UserMutation) Fields() []string {
+	fields := make([]string, 0, 8)
+	if m.account != nil {
+		fields = append(fields, user.FieldAccount)
+	}
+	if m.password_hash != nil {
+		fields = append(fields, user.FieldPasswordHash)
+	}
+	if m.name != nil {
+		fields = append(fields, user.FieldName)
+	}
+	if m.avatar != nil {
+		fields = append(fields, user.FieldAvatar)
+	}
+	if m.role != nil {
+		fields = append(fields, user.FieldRole)
+	}
+	if m.created_at != nil {
+		fields = append(fields, user.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, user.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, user.FieldDeletedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UserMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case user.FieldAccount:
+		return m.Account()
+	case user.FieldPasswordHash:
+		return m.PasswordHash()
+	case user.FieldName:
+		return m.Name()
+	case user.FieldAvatar:
+		return m.Avatar()
+	case user.FieldRole:
+		return m.Role()
+	case user.FieldCreatedAt:
+		return m.CreatedAt()
+	case user.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case user.FieldDeletedAt:
+		return m.DeletedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case user.FieldAccount:
+		return m.OldAccount(ctx)
+	case user.FieldPasswordHash:
+		return m.OldPasswordHash(ctx)
+	case user.FieldName:
+		return m.OldName(ctx)
+	case user.FieldAvatar:
+		return m.OldAvatar(ctx)
+	case user.FieldRole:
+		return m.OldRole(ctx)
+	case user.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case user.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case user.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown User field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case user.FieldAccount:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccount(v)
+		return nil
+	case user.FieldPasswordHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPasswordHash(v)
+		return nil
+	case user.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case user.FieldAvatar:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAvatar(v)
+		return nil
+	case user.FieldRole:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRole(v)
+		return nil
+	case user.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case user.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case user.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown User field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UserMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown User numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UserMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(user.FieldName) {
+		fields = append(fields, user.FieldName)
+	}
+	if m.FieldCleared(user.FieldAvatar) {
+		fields = append(fields, user.FieldAvatar)
+	}
+	if m.FieldCleared(user.FieldDeletedAt) {
+		fields = append(fields, user.FieldDeletedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UserMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UserMutation) ClearField(name string) error {
+	switch name {
+	case user.FieldName:
+		m.ClearName()
+		return nil
+	case user.FieldAvatar:
+		m.ClearAvatar()
+		return nil
+	case user.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown User nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UserMutation) ResetField(name string) error {
+	switch name {
+	case user.FieldAccount:
+		m.ResetAccount()
+		return nil
+	case user.FieldPasswordHash:
+		m.ResetPasswordHash()
+		return nil
+	case user.FieldName:
+		m.ResetName()
+		return nil
+	case user.FieldAvatar:
+		m.ResetAvatar()
+		return nil
+	case user.FieldRole:
+		m.ResetRole()
+		return nil
+	case user.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case user.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case user.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown User field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UserMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.charts != nil {
+		edges = append(edges, user.EdgeCharts)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UserMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case user.EdgeCharts:
+		ids := make([]ent.Value, 0, len(m.charts))
+		for id := range m.charts {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UserMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.removedcharts != nil {
+		edges = append(edges, user.EdgeCharts)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UserMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case user.EdgeCharts:
+		ids := make([]ent.Value, 0, len(m.removedcharts))
+		for id := range m.removedcharts {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UserMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedcharts {
+		edges = append(edges, user.EdgeCharts)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UserMutation) EdgeCleared(name string) bool {
+	switch name {
+	case user.EdgeCharts:
+		return m.clearedcharts
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UserMutation) ClearEdge(name string) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown User unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UserMutation) ResetEdge(name string) error {
+	switch name {
+	case user.EdgeCharts:
+		m.ResetCharts()
+		return nil
+	}
+	return fmt.Errorf("unknown User edge %s", name)
 }
