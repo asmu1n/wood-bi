@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"wood-bi/ent/placeholder"
+	"wood-bi/ent/chart"
+	"wood-bi/ent/user"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -73,7 +74,8 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			placeholder.Table: placeholder.ValidColumn,
+			chart.Table: chart.ValidColumn,
+			user.Table:  user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

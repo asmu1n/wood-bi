@@ -6,8 +6,9 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"wood-bi/ent/placeholder"
+	"wood-bi/ent/chart"
 	"wood-bi/ent/predicate"
+	"wood-bi/ent/user"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
@@ -16,65 +17,88 @@ import (
 	"entgo.io/ent/schema/field"
 )
 
-// PlaceholderQuery is the builder for querying Placeholder entities.
-type PlaceholderQuery struct {
+// ChartQuery is the builder for querying Chart entities.
+type ChartQuery struct {
 	config
 	ctx        *QueryContext
-	order      []placeholder.OrderOption
+	order      []chart.OrderOption
 	inters     []Interceptor
-	predicates []predicate.Placeholder
+	predicates []predicate.Chart
+	withOwner  *UserQuery
 	modifiers  []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
 }
 
-// Where adds a new predicate for the PlaceholderQuery builder.
-func (_q *PlaceholderQuery) Where(ps ...predicate.Placeholder) *PlaceholderQuery {
+// Where adds a new predicate for the ChartQuery builder.
+func (_q *ChartQuery) Where(ps ...predicate.Chart) *ChartQuery {
 	_q.predicates = append(_q.predicates, ps...)
 	return _q
 }
 
 // Limit the number of records to be returned by this query.
-func (_q *PlaceholderQuery) Limit(limit int) *PlaceholderQuery {
+func (_q *ChartQuery) Limit(limit int) *ChartQuery {
 	_q.ctx.Limit = &limit
 	return _q
 }
 
 // Offset to start from.
-func (_q *PlaceholderQuery) Offset(offset int) *PlaceholderQuery {
+func (_q *ChartQuery) Offset(offset int) *ChartQuery {
 	_q.ctx.Offset = &offset
 	return _q
 }
 
 // Unique configures the query builder to filter duplicate records on query.
 // By default, unique is set to true, and can be disabled using this method.
-func (_q *PlaceholderQuery) Unique(unique bool) *PlaceholderQuery {
+func (_q *ChartQuery) Unique(unique bool) *ChartQuery {
 	_q.ctx.Unique = &unique
 	return _q
 }
 
 // Order specifies how the records should be ordered.
-func (_q *PlaceholderQuery) Order(o ...placeholder.OrderOption) *PlaceholderQuery {
+func (_q *ChartQuery) Order(o ...chart.OrderOption) *ChartQuery {
 	_q.order = append(_q.order, o...)
 	return _q
 }
 
-// First returns the first Placeholder entity from the query.
-// Returns a *NotFoundError when no Placeholder was found.
-func (_q *PlaceholderQuery) First(ctx context.Context) (*Placeholder, error) {
+// QueryOwner chains the current query on the "owner" edge.
+func (_q *ChartQuery) QueryOwner() *UserQuery {
+	query := (&UserClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(chart.Table, chart.FieldID, selector),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, chart.OwnerTable, chart.OwnerColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// First returns the first Chart entity from the query.
+// Returns a *NotFoundError when no Chart was found.
+func (_q *ChartQuery) First(ctx context.Context) (*Chart, error) {
 	nodes, err := _q.Limit(1).All(setContextOp(ctx, _q.ctx, ent.OpQueryFirst))
 	if err != nil {
 		return nil, err
 	}
 	if len(nodes) == 0 {
-		return nil, &NotFoundError{placeholder.Label}
+		return nil, &NotFoundError{chart.Label}
 	}
 	return nodes[0], nil
 }
 
 // FirstX is like First, but panics if an error occurs.
-func (_q *PlaceholderQuery) FirstX(ctx context.Context) *Placeholder {
+func (_q *ChartQuery) FirstX(ctx context.Context) *Chart {
 	node, err := _q.First(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -82,22 +106,22 @@ func (_q *PlaceholderQuery) FirstX(ctx context.Context) *Placeholder {
 	return node
 }
 
-// FirstID returns the first Placeholder ID from the query.
-// Returns a *NotFoundError when no Placeholder ID was found.
-func (_q *PlaceholderQuery) FirstID(ctx context.Context) (id int64, err error) {
+// FirstID returns the first Chart ID from the query.
+// Returns a *NotFoundError when no Chart ID was found.
+func (_q *ChartQuery) FirstID(ctx context.Context) (id int64, err error) {
 	var ids []int64
 	if ids, err = _q.Limit(1).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryFirstID)); err != nil {
 		return
 	}
 	if len(ids) == 0 {
-		err = &NotFoundError{placeholder.Label}
+		err = &NotFoundError{chart.Label}
 		return
 	}
 	return ids[0], nil
 }
 
 // FirstIDX is like FirstID, but panics if an error occurs.
-func (_q *PlaceholderQuery) FirstIDX(ctx context.Context) int64 {
+func (_q *ChartQuery) FirstIDX(ctx context.Context) int64 {
 	id, err := _q.FirstID(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -105,10 +129,10 @@ func (_q *PlaceholderQuery) FirstIDX(ctx context.Context) int64 {
 	return id
 }
 
-// Only returns a single Placeholder entity found by the query, ensuring it only returns one.
-// Returns a *NotSingularError when more than one Placeholder entity is found.
-// Returns a *NotFoundError when no Placeholder entities are found.
-func (_q *PlaceholderQuery) Only(ctx context.Context) (*Placeholder, error) {
+// Only returns a single Chart entity found by the query, ensuring it only returns one.
+// Returns a *NotSingularError when more than one Chart entity is found.
+// Returns a *NotFoundError when no Chart entities are found.
+func (_q *ChartQuery) Only(ctx context.Context) (*Chart, error) {
 	nodes, err := _q.Limit(2).All(setContextOp(ctx, _q.ctx, ent.OpQueryOnly))
 	if err != nil {
 		return nil, err
@@ -117,14 +141,14 @@ func (_q *PlaceholderQuery) Only(ctx context.Context) (*Placeholder, error) {
 	case 1:
 		return nodes[0], nil
 	case 0:
-		return nil, &NotFoundError{placeholder.Label}
+		return nil, &NotFoundError{chart.Label}
 	default:
-		return nil, &NotSingularError{placeholder.Label}
+		return nil, &NotSingularError{chart.Label}
 	}
 }
 
 // OnlyX is like Only, but panics if an error occurs.
-func (_q *PlaceholderQuery) OnlyX(ctx context.Context) *Placeholder {
+func (_q *ChartQuery) OnlyX(ctx context.Context) *Chart {
 	node, err := _q.Only(ctx)
 	if err != nil {
 		panic(err)
@@ -132,10 +156,10 @@ func (_q *PlaceholderQuery) OnlyX(ctx context.Context) *Placeholder {
 	return node
 }
 
-// OnlyID is like Only, but returns the only Placeholder ID in the query.
-// Returns a *NotSingularError when more than one Placeholder ID is found.
+// OnlyID is like Only, but returns the only Chart ID in the query.
+// Returns a *NotSingularError when more than one Chart ID is found.
 // Returns a *NotFoundError when no entities are found.
-func (_q *PlaceholderQuery) OnlyID(ctx context.Context) (id int64, err error) {
+func (_q *ChartQuery) OnlyID(ctx context.Context) (id int64, err error) {
 	var ids []int64
 	if ids, err = _q.Limit(2).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryOnlyID)); err != nil {
 		return
@@ -144,15 +168,15 @@ func (_q *PlaceholderQuery) OnlyID(ctx context.Context) (id int64, err error) {
 	case 1:
 		id = ids[0]
 	case 0:
-		err = &NotFoundError{placeholder.Label}
+		err = &NotFoundError{chart.Label}
 	default:
-		err = &NotSingularError{placeholder.Label}
+		err = &NotSingularError{chart.Label}
 	}
 	return
 }
 
 // OnlyIDX is like OnlyID, but panics if an error occurs.
-func (_q *PlaceholderQuery) OnlyIDX(ctx context.Context) int64 {
+func (_q *ChartQuery) OnlyIDX(ctx context.Context) int64 {
 	id, err := _q.OnlyID(ctx)
 	if err != nil {
 		panic(err)
@@ -160,18 +184,18 @@ func (_q *PlaceholderQuery) OnlyIDX(ctx context.Context) int64 {
 	return id
 }
 
-// All executes the query and returns a list of Placeholders.
-func (_q *PlaceholderQuery) All(ctx context.Context) ([]*Placeholder, error) {
+// All executes the query and returns a list of Charts.
+func (_q *ChartQuery) All(ctx context.Context) ([]*Chart, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryAll)
 	if err := _q.prepareQuery(ctx); err != nil {
 		return nil, err
 	}
-	qr := querierAll[[]*Placeholder, *PlaceholderQuery]()
-	return withInterceptors[[]*Placeholder](ctx, _q, qr, _q.inters)
+	qr := querierAll[[]*Chart, *ChartQuery]()
+	return withInterceptors[[]*Chart](ctx, _q, qr, _q.inters)
 }
 
 // AllX is like All, but panics if an error occurs.
-func (_q *PlaceholderQuery) AllX(ctx context.Context) []*Placeholder {
+func (_q *ChartQuery) AllX(ctx context.Context) []*Chart {
 	nodes, err := _q.All(ctx)
 	if err != nil {
 		panic(err)
@@ -179,20 +203,20 @@ func (_q *PlaceholderQuery) AllX(ctx context.Context) []*Placeholder {
 	return nodes
 }
 
-// IDs executes the query and returns a list of Placeholder IDs.
-func (_q *PlaceholderQuery) IDs(ctx context.Context) (ids []int64, err error) {
+// IDs executes the query and returns a list of Chart IDs.
+func (_q *ChartQuery) IDs(ctx context.Context) (ids []int64, err error) {
 	if _q.ctx.Unique == nil && _q.path != nil {
 		_q.Unique(true)
 	}
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryIDs)
-	if err = _q.Select(placeholder.FieldID).Scan(ctx, &ids); err != nil {
+	if err = _q.Select(chart.FieldID).Scan(ctx, &ids); err != nil {
 		return nil, err
 	}
 	return ids, nil
 }
 
 // IDsX is like IDs, but panics if an error occurs.
-func (_q *PlaceholderQuery) IDsX(ctx context.Context) []int64 {
+func (_q *ChartQuery) IDsX(ctx context.Context) []int64 {
 	ids, err := _q.IDs(ctx)
 	if err != nil {
 		panic(err)
@@ -201,16 +225,16 @@ func (_q *PlaceholderQuery) IDsX(ctx context.Context) []int64 {
 }
 
 // Count returns the count of the given query.
-func (_q *PlaceholderQuery) Count(ctx context.Context) (int, error) {
+func (_q *ChartQuery) Count(ctx context.Context) (int, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryCount)
 	if err := _q.prepareQuery(ctx); err != nil {
 		return 0, err
 	}
-	return withInterceptors[int](ctx, _q, querierCount[*PlaceholderQuery](), _q.inters)
+	return withInterceptors[int](ctx, _q, querierCount[*ChartQuery](), _q.inters)
 }
 
 // CountX is like Count, but panics if an error occurs.
-func (_q *PlaceholderQuery) CountX(ctx context.Context) int {
+func (_q *ChartQuery) CountX(ctx context.Context) int {
 	count, err := _q.Count(ctx)
 	if err != nil {
 		panic(err)
@@ -219,7 +243,7 @@ func (_q *PlaceholderQuery) CountX(ctx context.Context) int {
 }
 
 // Exist returns true if the query has elements in the graph.
-func (_q *PlaceholderQuery) Exist(ctx context.Context) (bool, error) {
+func (_q *ChartQuery) Exist(ctx context.Context) (bool, error) {
 	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryExist)
 	switch _, err := _q.FirstID(ctx); {
 	case IsNotFound(err):
@@ -232,7 +256,7 @@ func (_q *PlaceholderQuery) Exist(ctx context.Context) (bool, error) {
 }
 
 // ExistX is like Exist, but panics if an error occurs.
-func (_q *PlaceholderQuery) ExistX(ctx context.Context) bool {
+func (_q *ChartQuery) ExistX(ctx context.Context) bool {
 	exist, err := _q.Exist(ctx)
 	if err != nil {
 		panic(err)
@@ -240,51 +264,85 @@ func (_q *PlaceholderQuery) ExistX(ctx context.Context) bool {
 	return exist
 }
 
-// Clone returns a duplicate of the PlaceholderQuery builder, including all associated steps. It can be
+// Clone returns a duplicate of the ChartQuery builder, including all associated steps. It can be
 // used to prepare common query builders and use them differently after the clone is made.
-func (_q *PlaceholderQuery) Clone() *PlaceholderQuery {
+func (_q *ChartQuery) Clone() *ChartQuery {
 	if _q == nil {
 		return nil
 	}
-	return &PlaceholderQuery{
+	return &ChartQuery{
 		config:     _q.config,
 		ctx:        _q.ctx.Clone(),
-		order:      append([]placeholder.OrderOption{}, _q.order...),
+		order:      append([]chart.OrderOption{}, _q.order...),
 		inters:     append([]Interceptor{}, _q.inters...),
-		predicates: append([]predicate.Placeholder{}, _q.predicates...),
+		predicates: append([]predicate.Chart{}, _q.predicates...),
+		withOwner:  _q.withOwner.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
 }
 
+// WithOwner tells the query-builder to eager-load the nodes that are connected to
+// the "owner" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ChartQuery) WithOwner(opts ...func(*UserQuery)) *ChartQuery {
+	query := (&UserClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withOwner = query
+	return _q
+}
+
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
-func (_q *PlaceholderQuery) GroupBy(field string, fields ...string) *PlaceholderGroupBy {
+//
+// Example:
+//
+//	var v []struct {
+//		Name string `json:"name,omitempty"`
+//		Count int `json:"count,omitempty"`
+//	}
+//
+//	client.Chart.Query().
+//		GroupBy(chart.FieldName).
+//		Aggregate(ent.Count()).
+//		Scan(ctx, &v)
+func (_q *ChartQuery) GroupBy(field string, fields ...string) *ChartGroupBy {
 	_q.ctx.Fields = append([]string{field}, fields...)
-	grbuild := &PlaceholderGroupBy{build: _q}
+	grbuild := &ChartGroupBy{build: _q}
 	grbuild.flds = &_q.ctx.Fields
-	grbuild.label = placeholder.Label
+	grbuild.label = chart.Label
 	grbuild.scan = grbuild.Scan
 	return grbuild
 }
 
 // Select allows the selection one or more fields/columns for the given query,
 // instead of selecting all fields in the entity.
-func (_q *PlaceholderQuery) Select(fields ...string) *PlaceholderSelect {
+//
+// Example:
+//
+//	var v []struct {
+//		Name string `json:"name,omitempty"`
+//	}
+//
+//	client.Chart.Query().
+//		Select(chart.FieldName).
+//		Scan(ctx, &v)
+func (_q *ChartQuery) Select(fields ...string) *ChartSelect {
 	_q.ctx.Fields = append(_q.ctx.Fields, fields...)
-	sbuild := &PlaceholderSelect{PlaceholderQuery: _q}
-	sbuild.label = placeholder.Label
+	sbuild := &ChartSelect{ChartQuery: _q}
+	sbuild.label = chart.Label
 	sbuild.flds, sbuild.scan = &_q.ctx.Fields, sbuild.Scan
 	return sbuild
 }
 
-// Aggregate returns a PlaceholderSelect configured with the given aggregations.
-func (_q *PlaceholderQuery) Aggregate(fns ...AggregateFunc) *PlaceholderSelect {
+// Aggregate returns a ChartSelect configured with the given aggregations.
+func (_q *ChartQuery) Aggregate(fns ...AggregateFunc) *ChartSelect {
 	return _q.Select().Aggregate(fns...)
 }
 
-func (_q *PlaceholderQuery) prepareQuery(ctx context.Context) error {
+func (_q *ChartQuery) prepareQuery(ctx context.Context) error {
 	for _, inter := range _q.inters {
 		if inter == nil {
 			return fmt.Errorf("ent: uninitialized interceptor (forgotten import ent/runtime?)")
@@ -296,7 +354,7 @@ func (_q *PlaceholderQuery) prepareQuery(ctx context.Context) error {
 		}
 	}
 	for _, f := range _q.ctx.Fields {
-		if !placeholder.ValidColumn(f) {
+		if !chart.ValidColumn(f) {
 			return &ValidationError{Name: f, err: fmt.Errorf("ent: invalid field %q for query", f)}
 		}
 	}
@@ -310,17 +368,21 @@ func (_q *PlaceholderQuery) prepareQuery(ctx context.Context) error {
 	return nil
 }
 
-func (_q *PlaceholderQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Placeholder, error) {
+func (_q *ChartQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Chart, error) {
 	var (
-		nodes = []*Placeholder{}
-		_spec = _q.querySpec()
+		nodes       = []*Chart{}
+		_spec       = _q.querySpec()
+		loadedTypes = [1]bool{
+			_q.withOwner != nil,
+		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
-		return (*Placeholder).scanValues(nil, columns)
+		return (*Chart).scanValues(nil, columns)
 	}
 	_spec.Assign = func(columns []string, values []any) error {
-		node := &Placeholder{config: _q.config}
+		node := &Chart{config: _q.config}
 		nodes = append(nodes, node)
+		node.Edges.loadedTypes = loadedTypes
 		return node.assignValues(columns, values)
 	}
 	if len(_q.modifiers) > 0 {
@@ -335,10 +397,46 @@ func (_q *PlaceholderQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withOwner; query != nil {
+		if err := _q.loadOwner(ctx, query, nodes, nil,
+			func(n *Chart, e *User) { n.Edges.Owner = e }); err != nil {
+			return nil, err
+		}
+	}
 	return nodes, nil
 }
 
-func (_q *PlaceholderQuery) sqlCount(ctx context.Context) (int, error) {
+func (_q *ChartQuery) loadOwner(ctx context.Context, query *UserQuery, nodes []*Chart, init func(*Chart), assign func(*Chart, *User)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*Chart)
+	for i := range nodes {
+		fk := nodes[i].UserID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(user.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "user_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
+
+func (_q *ChartQuery) sqlCount(ctx context.Context) (int, error) {
 	_spec := _q.querySpec()
 	if len(_q.modifiers) > 0 {
 		_spec.Modifiers = _q.modifiers
@@ -350,8 +448,8 @@ func (_q *PlaceholderQuery) sqlCount(ctx context.Context) (int, error) {
 	return sqlgraph.CountNodes(ctx, _q.driver, _spec)
 }
 
-func (_q *PlaceholderQuery) querySpec() *sqlgraph.QuerySpec {
-	_spec := sqlgraph.NewQuerySpec(placeholder.Table, placeholder.Columns, sqlgraph.NewFieldSpec(placeholder.FieldID, field.TypeInt64))
+func (_q *ChartQuery) querySpec() *sqlgraph.QuerySpec {
+	_spec := sqlgraph.NewQuerySpec(chart.Table, chart.Columns, sqlgraph.NewFieldSpec(chart.FieldID, field.TypeInt64))
 	_spec.From = _q.sql
 	if unique := _q.ctx.Unique; unique != nil {
 		_spec.Unique = *unique
@@ -360,11 +458,14 @@ func (_q *PlaceholderQuery) querySpec() *sqlgraph.QuerySpec {
 	}
 	if fields := _q.ctx.Fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
-		_spec.Node.Columns = append(_spec.Node.Columns, placeholder.FieldID)
+		_spec.Node.Columns = append(_spec.Node.Columns, chart.FieldID)
 		for i := range fields {
-			if fields[i] != placeholder.FieldID {
+			if fields[i] != chart.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withOwner != nil {
+			_spec.Node.AddColumnOnce(chart.FieldUserID)
 		}
 	}
 	if ps := _q.predicates; len(ps) > 0 {
@@ -390,12 +491,12 @@ func (_q *PlaceholderQuery) querySpec() *sqlgraph.QuerySpec {
 	return _spec
 }
 
-func (_q *PlaceholderQuery) sqlQuery(ctx context.Context) *sql.Selector {
+func (_q *ChartQuery) sqlQuery(ctx context.Context) *sql.Selector {
 	builder := sql.Dialect(_q.driver.Dialect())
-	t1 := builder.Table(placeholder.Table)
+	t1 := builder.Table(chart.Table)
 	columns := _q.ctx.Fields
 	if len(columns) == 0 {
-		columns = placeholder.Columns
+		columns = chart.Columns
 	}
 	selector := builder.Select(t1.Columns(columns...)...).From(t1)
 	if _q.sql != nil {
@@ -428,7 +529,7 @@ func (_q *PlaceholderQuery) sqlQuery(ctx context.Context) *sql.Selector {
 // ForUpdate locks the selected rows against concurrent updates, and prevent them from being
 // updated, deleted or "selected ... for update" by other sessions, until the transaction is
 // either committed or rolled-back.
-func (_q *PlaceholderQuery) ForUpdate(opts ...sql.LockOption) *PlaceholderQuery {
+func (_q *ChartQuery) ForUpdate(opts ...sql.LockOption) *ChartQuery {
 	if _q.driver.Dialect() == dialect.Postgres {
 		_q.Unique(false)
 	}
@@ -441,7 +542,7 @@ func (_q *PlaceholderQuery) ForUpdate(opts ...sql.LockOption) *PlaceholderQuery 
 // ForShare behaves similarly to ForUpdate, except that it acquires a shared mode lock
 // on any rows that are read. Other sessions can read the rows, but cannot modify them
 // until your transaction commits.
-func (_q *PlaceholderQuery) ForShare(opts ...sql.LockOption) *PlaceholderQuery {
+func (_q *ChartQuery) ForShare(opts ...sql.LockOption) *ChartQuery {
 	if _q.driver.Dialect() == dialect.Postgres {
 		_q.Unique(false)
 	}
@@ -451,28 +552,28 @@ func (_q *PlaceholderQuery) ForShare(opts ...sql.LockOption) *PlaceholderQuery {
 	return _q
 }
 
-// PlaceholderGroupBy is the group-by builder for Placeholder entities.
-type PlaceholderGroupBy struct {
+// ChartGroupBy is the group-by builder for Chart entities.
+type ChartGroupBy struct {
 	selector
-	build *PlaceholderQuery
+	build *ChartQuery
 }
 
 // Aggregate adds the given aggregation functions to the group-by query.
-func (_g *PlaceholderGroupBy) Aggregate(fns ...AggregateFunc) *PlaceholderGroupBy {
+func (_g *ChartGroupBy) Aggregate(fns ...AggregateFunc) *ChartGroupBy {
 	_g.fns = append(_g.fns, fns...)
 	return _g
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (_g *PlaceholderGroupBy) Scan(ctx context.Context, v any) error {
+func (_g *ChartGroupBy) Scan(ctx context.Context, v any) error {
 	ctx = setContextOp(ctx, _g.build.ctx, ent.OpQueryGroupBy)
 	if err := _g.build.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*PlaceholderQuery, *PlaceholderGroupBy](ctx, _g.build, _g, _g.build.inters, v)
+	return scanWithInterceptors[*ChartQuery, *ChartGroupBy](ctx, _g.build, _g, _g.build.inters, v)
 }
 
-func (_g *PlaceholderGroupBy) sqlScan(ctx context.Context, root *PlaceholderQuery, v any) error {
+func (_g *ChartGroupBy) sqlScan(ctx context.Context, root *ChartQuery, v any) error {
 	selector := root.sqlQuery(ctx).Select()
 	aggregation := make([]string, 0, len(_g.fns))
 	for _, fn := range _g.fns {
@@ -499,28 +600,28 @@ func (_g *PlaceholderGroupBy) sqlScan(ctx context.Context, root *PlaceholderQuer
 	return sql.ScanSlice(rows, v)
 }
 
-// PlaceholderSelect is the builder for selecting fields of Placeholder entities.
-type PlaceholderSelect struct {
-	*PlaceholderQuery
+// ChartSelect is the builder for selecting fields of Chart entities.
+type ChartSelect struct {
+	*ChartQuery
 	selector
 }
 
 // Aggregate adds the given aggregation functions to the selector query.
-func (_s *PlaceholderSelect) Aggregate(fns ...AggregateFunc) *PlaceholderSelect {
+func (_s *ChartSelect) Aggregate(fns ...AggregateFunc) *ChartSelect {
 	_s.fns = append(_s.fns, fns...)
 	return _s
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (_s *PlaceholderSelect) Scan(ctx context.Context, v any) error {
+func (_s *ChartSelect) Scan(ctx context.Context, v any) error {
 	ctx = setContextOp(ctx, _s.ctx, ent.OpQuerySelect)
 	if err := _s.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*PlaceholderQuery, *PlaceholderSelect](ctx, _s.PlaceholderQuery, _s, _s.inters, v)
+	return scanWithInterceptors[*ChartQuery, *ChartSelect](ctx, _s.ChartQuery, _s, _s.inters, v)
 }
 
-func (_s *PlaceholderSelect) sqlScan(ctx context.Context, root *PlaceholderQuery, v any) error {
+func (_s *ChartSelect) sqlScan(ctx context.Context, root *ChartQuery, v any) error {
 	selector := root.sqlQuery(ctx)
 	aggregation := make([]string, 0, len(_s.fns))
 	for _, fn := range _s.fns {

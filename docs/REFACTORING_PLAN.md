@@ -476,14 +476,14 @@ internal/infra/
 - [x] 技术选型与模块划分
 - [x] **关键决策已确认**（见 §0）
 
-### Phase 1 — 用户闭环 + Schema
+### Phase 1 — 用户闭环 + Schema ✅
 
-1. Ent schema：`user`、`chart`（Postgres）
-2. `module/user`：注册、登录、注销、当前用户、更新资料
-3. Session 与 `AuthRequired` / `AdminRequired` 打通
-4. bcrypt；基础测试
+1. [x] Ent schema：`user`、`chart`（Postgres）
+2. [x] `module/user`：注册、登录、注销、当前用户、更新资料 + 管理端 CRUD
+3. [x] Session 与 `AuthRequired` / `AdminRequired` 打通
+4. [x] bcrypt；Service 单测
 
-**验收：** 可注册登录，Swagger 可调，Session 跨请求有效。
+**验收：** 可注册登录，Swagger 可调，Session 跨请求有效（需本地 Postgres + Redis）。
 
 ### Phase 2 — 图表 CRUD + 同步 AI
 

@@ -3,18 +3,110 @@
 package ent
 
 import (
-	"wood-bi/ent/placeholder"
+	"time"
+	"wood-bi/ent/chart"
 	"wood-bi/ent/schema"
+	"wood-bi/ent/user"
 )
 
 // The init function reads all schema descriptors with runtime code
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
-	placeholderFields := schema.Placeholder{}.Fields()
-	_ = placeholderFields
-	// placeholderDescID is the schema descriptor for id field.
-	placeholderDescID := placeholderFields[0].Descriptor()
-	// placeholder.IDValidator is a validator for the "id" field. It is called by the builders before save.
-	placeholder.IDValidator = placeholderDescID.Validators[0].(func(int64) error)
+	chartFields := schema.Chart{}.Fields()
+	_ = chartFields
+	// chartDescName is the schema descriptor for name field.
+	chartDescName := chartFields[1].Descriptor()
+	// chart.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	chart.NameValidator = chartDescName.Validators[0].(func(string) error)
+	// chartDescChartType is the schema descriptor for chart_type field.
+	chartDescChartType := chartFields[4].Descriptor()
+	// chart.ChartTypeValidator is a validator for the "chart_type" field. It is called by the builders before save.
+	chart.ChartTypeValidator = chartDescChartType.Validators[0].(func(string) error)
+	// chartDescStatus is the schema descriptor for status field.
+	chartDescStatus := chartFields[7].Descriptor()
+	// chart.DefaultStatus holds the default value on creation for the status field.
+	chart.DefaultStatus = chartDescStatus.Default.(string)
+	// chart.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	chart.StatusValidator = chartDescStatus.Validators[0].(func(string) error)
+	// chartDescCreatedAt is the schema descriptor for created_at field.
+	chartDescCreatedAt := chartFields[10].Descriptor()
+	// chart.DefaultCreatedAt holds the default value on creation for the created_at field.
+	chart.DefaultCreatedAt = chartDescCreatedAt.Default.(func() time.Time)
+	// chartDescUpdatedAt is the schema descriptor for updated_at field.
+	chartDescUpdatedAt := chartFields[11].Descriptor()
+	// chart.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	chart.DefaultUpdatedAt = chartDescUpdatedAt.Default.(func() time.Time)
+	// chart.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	chart.UpdateDefaultUpdatedAt = chartDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// chartDescID is the schema descriptor for id field.
+	chartDescID := chartFields[0].Descriptor()
+	// chart.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	chart.IDValidator = chartDescID.Validators[0].(func(int64) error)
+	userFields := schema.User{}.Fields()
+	_ = userFields
+	// userDescAccount is the schema descriptor for account field.
+	userDescAccount := userFields[1].Descriptor()
+	// user.AccountValidator is a validator for the "account" field. It is called by the builders before save.
+	user.AccountValidator = func() func(string) error {
+		validators := userDescAccount.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(account string) error {
+			for _, fn := range fns {
+				if err := fn(account); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// userDescPasswordHash is the schema descriptor for password_hash field.
+	userDescPasswordHash := userFields[2].Descriptor()
+	// user.PasswordHashValidator is a validator for the "password_hash" field. It is called by the builders before save.
+	user.PasswordHashValidator = func() func(string) error {
+		validators := userDescPasswordHash.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(password_hash string) error {
+			for _, fn := range fns {
+				if err := fn(password_hash); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// userDescName is the schema descriptor for name field.
+	userDescName := userFields[3].Descriptor()
+	// user.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	user.NameValidator = userDescName.Validators[0].(func(string) error)
+	// userDescAvatar is the schema descriptor for avatar field.
+	userDescAvatar := userFields[4].Descriptor()
+	// user.AvatarValidator is a validator for the "avatar" field. It is called by the builders before save.
+	user.AvatarValidator = userDescAvatar.Validators[0].(func(string) error)
+	// userDescRole is the schema descriptor for role field.
+	userDescRole := userFields[5].Descriptor()
+	// user.DefaultRole holds the default value on creation for the role field.
+	user.DefaultRole = userDescRole.Default.(string)
+	// user.RoleValidator is a validator for the "role" field. It is called by the builders before save.
+	user.RoleValidator = userDescRole.Validators[0].(func(string) error)
+	// userDescCreatedAt is the schema descriptor for created_at field.
+	userDescCreatedAt := userFields[6].Descriptor()
+	// user.DefaultCreatedAt holds the default value on creation for the created_at field.
+	user.DefaultCreatedAt = userDescCreatedAt.Default.(func() time.Time)
+	// userDescUpdatedAt is the schema descriptor for updated_at field.
+	userDescUpdatedAt := userFields[7].Descriptor()
+	// user.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	user.DefaultUpdatedAt = userDescUpdatedAt.Default.(func() time.Time)
+	// user.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	user.UpdateDefaultUpdatedAt = userDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// userDescID is the schema descriptor for id field.
+	userDescID := userFields[0].Descriptor()
+	// user.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	user.IDValidator = userDescID.Validators[0].(func(int64) error)
 }
