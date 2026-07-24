@@ -18,13 +18,14 @@ func IsBizError(err error) bool {
 }
 
 var (
-	Success     = Code{HTTP: 200, Biz: 0, Message: "ok"}
-	ParamsError = Code{HTTP: 400, Biz: 40000, Message: "请求参数错误"}
-	NotFound    = Code{HTTP: 404, Biz: 40001, Message: "数据不存在"}
-	NotLogin    = Code{HTTP: 401, Biz: 40100, Message: "未登录"}
-	NoAuth      = Code{HTTP: 403, Biz: 40101, Message: "无权限"}
-	Forbidden   = Code{HTTP: 403, Biz: 40301, Message: "禁止操作"}
-	SystemError = Code{HTTP: 500, Biz: 50000, Message: "系统内部异常"}
+	Success         = Code{HTTP: 200, Biz: 0, Message: "ok"}
+	ParamsError     = Code{HTTP: 400, Biz: 40000, Message: "请求参数错误"}
+	NotFound        = Code{HTTP: 404, Biz: 40001, Message: "数据不存在"}
+	NotLogin        = Code{HTTP: 401, Biz: 40100, Message: "未登录"}
+	NoAuth          = Code{HTTP: 403, Biz: 40101, Message: "无权限"}
+	Forbidden       = Code{HTTP: 403, Biz: 40301, Message: "禁止操作"}
+	TooManyRequests = Code{HTTP: 429, Biz: 42900, Message: "请求过于频繁"}
+	SystemError     = Code{HTTP: 500, Biz: 50000, Message: "系统内部异常"}
 )
 
 type BizError struct {
