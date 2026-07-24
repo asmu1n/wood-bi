@@ -485,15 +485,15 @@ internal/infra/
 
 **验收：** 可注册登录，Swagger 可调，Session 跨请求有效（需本地 Postgres + Redis）。
 
-### Phase 2 — 图表 CRUD + 同步 AI
+### Phase 2 — 图表 CRUD + 同步 AI ✅
 
-1. `module/chart` CRUD 与分页（`pkg/page`，含 my list）
-2. `port.AI` + `infra/ai`（OpenAI 兼容）
-3. Excelize：xlsx → CSV
-4. `POST /chart/gen`：Prompt + **JSON 解析** + 落库
-5. `port.RateLimiter` 挂生成接口
+1. [x] `module/chart` CRUD 与分页（`pkg/page`，含 my list）
+2. [x] `port.AI` + `infra/ai`（OpenAI 兼容）
+3. [x] Excelize：xlsx → CSV
+4. [x] `POST /chart/gen`：Prompt + **JSON 解析** + 落库
+5. [x] `port.RateLimiter` 挂生成接口
 
-**验收：** 上传样例 Excel，返回 ECharts option 与 conclusion 并落库。
+**验收：** 配置 `AI_API_KEY` 后上传样例 Excel，返回 ECharts option 与 conclusion 并落库。
 
 ### Phase 3 — RabbitMQ 异步
 

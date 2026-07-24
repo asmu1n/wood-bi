@@ -19,6 +19,7 @@ internal/module/<name>/
 | 模块 | 说明 |
 |------|------|
 | `user` | 注册/登录/注销/资料；管理员用户 CRUD（Session 鉴权） |
+| `chart` | 图表 CRUD、同步 AI 生成（Excel→CSV→OpenAI 兼容）、Redis 限流 |
 
 新增业务时：
 

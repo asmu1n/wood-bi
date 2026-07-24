@@ -7,11 +7,16 @@ import (
 	"syscall"
 
 	"wood-bi/internal/httpapi"
+	"wood-bi/internal/infra/ai"
 	"wood-bi/internal/infra/database"
+	"wood-bi/internal/infra/ratelimit"
 	"wood-bi/internal/infra/redis"
+	"wood-bi/internal/module/chart"
+	chartrepo "wood-bi/internal/module/chart/repo"
 	"wood-bi/internal/module/user"
 	userrepo "wood-bi/internal/module/user/repo"
 	"wood-bi/internal/pkg/logger"
+	"wood-bi/internal/port"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -59,15 +64,30 @@ func main() {
 		logger.Fatal("connect redis failed", logger.FieldErr, err)
 	}
 	defer redisClient.Close()
-	_ = redisClient // Phase 2+：cache / lock / rate limit
 
 	userSvc := user.NewService(userrepo.New(db.Client))
+
+	var aiClient port.AI
+	aiImpl, err := ai.New()
+	if err != nil {
+		// 允许无 AI Key 启动（CRUD 可用）；/chart/gen 会返回业务错误
+		logger.Warn("ai client not configured",
+			logger.FieldPurpose, logger.PurposeInfra,
+			logger.FieldEvent, "ai.config_skip",
+			logger.FieldErr, err,
+		)
+	} else {
+		aiClient = aiImpl
+	}
+
+	limiter := ratelimit.New(redisClient)
+	chartSvc := chart.NewService(chartrepo.New(db.Client), aiClient, limiter)
 
 	r.Use(sessions.Sessions("session", store))
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	httpapi.RegisterRouter(r, userSvc)
+	httpapi.RegisterRouter(r, userSvc, chartSvc)
 
 	logger.Info("http server starting",
 		logger.FieldPurpose, logger.PurposeInfra,
