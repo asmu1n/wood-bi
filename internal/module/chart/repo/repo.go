@@ -106,6 +106,29 @@ func (r *Repo) SoftDelete(ctx context.Context, id int64) error {
 	return err
 }
 
+func (r *Repo) ListByStatusOlderThan(ctx context.Context, status string, before time.Time, limit int) ([]*chart.Chart, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.client.Chart.Query().
+		Where(
+			entchart.DeletedAtIsNil(),
+			entchart.StatusEQ(status),
+			entchart.UpdatedAtLT(before),
+		).
+		Order(entchart.ByUpdatedAt(sql.OrderAsc())).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*chart.Chart, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toDomain(row))
+	}
+	return out, nil
+}
+
 func (r *Repo) ListPage(ctx context.Context, q chart.QueryParams) ([]*chart.Chart, int64, error) {
 	query := r.client.Chart.Query().Where(entchart.DeletedAtIsNil())
 	if q.ID > 0 {

@@ -3,6 +3,8 @@ package chart
 import (
 	"testing"
 
+	"wood-bi/internal/pkg/response"
+
 	"github.com/xuri/excelize/v2"
 )
 
@@ -21,7 +23,7 @@ func TestExcelToCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	csv, err := ExcelToCSV(buf.Bytes())
+	csv, err := excelToCSV(buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,5 +32,16 @@ func TestExcelToCSV(t *testing.T) {
 		if !contains(csv, p) {
 			t.Fatalf("csv missing %q: %s", p, csv)
 		}
+	}
+}
+
+func TestExcelToCSVBizError(t *testing.T) {
+	_, err := excelToCSV(nil)
+	if !response.IsBizError(err) {
+		t.Fatalf("expected biz error, got %v", err)
+	}
+	_, err = excelToCSV([]byte("not-an-xlsx"))
+	if !response.IsBizError(err) {
+		t.Fatalf("expected biz error for bad file, got %v", err)
 	}
 }
