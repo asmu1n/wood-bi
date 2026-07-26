@@ -85,8 +85,13 @@ type GenInput struct {
 // GenResult 同步生成成功返回。
 type GenResult struct {
 	ChartID   int64  `json:"chartId"`
-	GenChart  string `json:"genChart"`
-	GenResult string `json:"genResult"`
+	GenChart  string `json:"genChart,omitempty"`
+	GenResult string `json:"genResult,omitempty"`
+}
+
+// AsyncSubmitResult 异步提交返回（仅 chartId，前端轮询详情）。
+type AsyncSubmitResult struct {
+	ChartID int64 `json:"chartId"`
 }
 
 // AIOutput 模型应返回的 JSON 结构。

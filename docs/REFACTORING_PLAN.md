@@ -495,13 +495,13 @@ internal/infra/
 
 **验收：** 配置 `AI_API_KEY` 后上传样例 Excel，返回 ECharts option 与 conclusion 并落库。
 
-### Phase 3 — RabbitMQ 异步
+### Phase 3 — RabbitMQ 异步 ✅
 
-1. compose 增加 RabbitMQ；拓扑声明（exchange/queue/bind）
-2. `port.ChartGenQueue` + `infra/mq/rabbit` Publisher
-3. Consumer 调 `ProcessGenJob`；手动 ack；状态机完整
-4. `POST /chart/gen/async`；可选 `cmd/worker` 拆分
-5. Cron：长时间 `running` / 滞留 `wait` 的补偿
+1. [x] compose 增加 RabbitMQ；拓扑声明（exchange/queue/bind）
+2. [x] `port.ChartGenQueue` + `infra/mq/rabbit` Publisher
+3. [x] Consumer 调 `ProcessGenJob`；手动 ack；状态机完整（同进程消费，可后续拆 worker）
+4. [x] `POST /chart/gen/async`
+5. [x] Cron：长时间 `running` → failed；滞留 `wait` → 补投
 
 **验收：** 异步提交立即返回 chartId；轮询至 succeed/failed；重启后未 ack 消息可再投。
 

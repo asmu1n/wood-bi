@@ -31,7 +31,7 @@ type redisLimiter struct {
 }
 
 // New 创建限流器；prefix 用于隔离 key 命名空间。
-func New(client redis.UniversalClient) port.RateLimiter {
+func New(client redis.UniversalClient) *redisLimiter {
 	return &redisLimiter{
 		client: client,
 		prefix: "ratelimit:",

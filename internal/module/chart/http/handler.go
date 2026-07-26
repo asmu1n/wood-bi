@@ -34,6 +34,7 @@ func Register(rg *gin.RouterGroup, svc *chart.Service) {
 		g.POST("/list/page", h.ListPage)
 		g.POST("/my/list/page", h.ListMyPage)
 		g.POST("/gen", h.Gen)
+		g.POST("/gen/async", h.GenAsync)
 		g.POST("/update", middleware.AdminRequired(), h.AdminUpdate)
 	}
 }
@@ -180,39 +181,60 @@ func (h *Handler) Gen(c *gin.Context) {
 		response.RespondError(c, err)
 		return
 	}
-
-	fileHeader, err := c.FormFile("file")
+	in, err := bindGenMultipart(c)
 	if err != nil {
 		response.RespondBindingError(c, err)
 		return
 	}
-	f, err := fileHeader.Open()
-	if err != nil {
-		response.RespondError(c, err)
-		return
-	}
-	defer f.Close()
-
-	const maxRead = 1<<20 + 1024
-	limited := io.LimitReader(f, maxRead)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		response.RespondError(c, err)
-		return
-	}
-
-	in := chart.GenInput{
-		Name:      c.PostForm("name"),
-		Goal:      c.PostForm("goal"),
-		ChartType: c.PostForm("chartType"),
-		FileBytes: data,
-		Filename:  filepath.Base(fileHeader.Filename),
-	}
-
 	result, err := h.svc.GenerateSync(c.Request.Context(), uid, in)
 	if err != nil {
 		response.RespondError(c, err)
 		return
 	}
 	response.RespondOK(c, result)
+}
+
+// GenAsync 异步 AI 生成：multipart 上传后投递 MQ，响应仅含 chartId。
+func (h *Handler) GenAsync(c *gin.Context) {
+	uid, err := middleware.GetLoginUserID(c)
+	if err != nil {
+		response.RespondError(c, err)
+		return
+	}
+	in, err := bindGenMultipart(c)
+	if err != nil {
+		response.RespondBindingError(c, err)
+		return
+	}
+	result, err := h.svc.GenerateAsync(c.Request.Context(), uid, in)
+	if err != nil {
+		response.RespondError(c, err)
+		return
+	}
+	response.RespondOK(c, result)
+}
+
+func bindGenMultipart(c *gin.Context) (chart.GenInput, error) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return chart.GenInput{}, err
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		return chart.GenInput{}, err
+	}
+	defer f.Close()
+
+	const maxRead = 1<<20 + 1024
+	data, err := io.ReadAll(io.LimitReader(f, maxRead))
+	if err != nil {
+		return chart.GenInput{}, err
+	}
+	return chart.GenInput{
+		Name:      c.PostForm("name"),
+		Goal:      c.PostForm("goal"),
+		ChartType: c.PostForm("chartType"),
+		FileBytes: data,
+		Filename:  filepath.Base(fileHeader.Filename),
+	}, nil
 }

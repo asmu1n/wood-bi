@@ -12,14 +12,14 @@ import (
 	"wood-bi/internal/port"
 )
 
-// Client OpenAI 兼容 Chat Completions 实现。
-type Client struct {
+// client OpenAI 兼容 Chat Completions 实现。
+type client struct {
 	cfg        Config
 	httpClient *http.Client
 }
 
 // New 从环境变量创建 AI 客户端；API Key 未配置时返回错误。
-func New() (*Client, error) {
+func New() (*client, error) {
 	cfg := loadConfig()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -28,8 +28,8 @@ func New() (*Client, error) {
 }
 
 // NewWithConfig 使用显式配置创建客户端（便于测试）。
-func NewWithConfig(cfg Config) *Client {
-	return &Client{
+func NewWithConfig(cfg Config) *client {
+	return &client{
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
@@ -38,9 +38,9 @@ func NewWithConfig(cfg Config) *Client {
 }
 
 type openAIRequest struct {
-	Model          string              `json:"model"`
-	Messages       []openAIMessage     `json:"messages"`
-	ResponseFormat *openAIRespFormat   `json:"response_format,omitempty"`
+	Model          string            `json:"model"`
+	Messages       []openAIMessage   `json:"messages"`
+	ResponseFormat *openAIRespFormat `json:"response_format,omitempty"`
 }
 
 type openAIMessage struct {
@@ -65,7 +65,7 @@ type openAIResponse struct {
 }
 
 // Chat 调用 /chat/completions。
-func (c *Client) Chat(ctx context.Context, req port.ChatRequest) (*port.ChatResponse, error) {
+func (c *client) Chat(ctx context.Context, req port.ChatRequest) (*port.ChatResponse, error) {
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("ai: empty messages")
 	}
@@ -76,7 +76,7 @@ func (c *Client) Chat(ctx context.Context, req port.ChatRequest) (*port.ChatResp
 	}
 
 	body := openAIRequest{
-		Model: model,
+		Model:    model,
 		Messages: make([]openAIMessage, 0, len(req.Messages)),
 	}
 	for _, m := range req.Messages {
@@ -129,6 +129,3 @@ func (c *Client) Chat(ctx context.Context, req port.ChatRequest) (*port.ChatResp
 
 	return &port.ChatResponse{Content: parsed.Choices[0].Message.Content}, nil
 }
-
-// 确保实现接口。
-var _ port.AI = (*Client)(nil)

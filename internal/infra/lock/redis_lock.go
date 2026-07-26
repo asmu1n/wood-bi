@@ -25,7 +25,7 @@ type redisLocker struct {
 }
 
 // New 实例化 Redis 锁组件。
-func New(client redis.UniversalClient) port.Locker {
+func New(client redis.UniversalClient) *redisLocker {
 	return &redisLocker{
 		client: client,
 	}
