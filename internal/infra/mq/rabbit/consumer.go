@@ -51,8 +51,11 @@ func NewConsumer(conn *amqp.Connection, cfg mqConfig, handle GenJobFunc) (*Consu
 
 // Start 在后台启动消费循环，直到 ctx 取消或 Close。
 func (c *Consumer) Start(ctx context.Context) error {
+	// 创建带取消功能的上下文
 	runCtx, cancel := context.WithCancel(ctx)
+	// 互斥锁完成 `cancel` 的初始化
 	c.mu.Lock()
+	// 只允许启动一次
 	if c.cancel != nil {
 		c.mu.Unlock()
 		cancel()
@@ -71,6 +74,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 
 // Close 停止消费循环并关闭当前 channel。
 func (c *Consumer) Close() error {
+	// 互斥锁更新状态
 	c.mu.Lock()
 	if c.cancel != nil {
 		c.cancel()
@@ -94,6 +98,7 @@ func (c *Consumer) loop(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		// 尝试消费消息，如果报错则记录日志并重试（`consumeOnce` 会话级长时间阻塞接收消息）
 		if err := c.consumeOnce(ctx); err != nil {
 			if ctx.Err() != nil {
 				return
@@ -103,6 +108,7 @@ func (c *Consumer) loop(ctx context.Context) {
 				logger.FieldEvent, "rabbit.consume_error",
 				logger.FieldErr, err,
 			)
+			// 判断 ctx 是否取消，如果取消则直接退出 ，如果没有则等待 backoff 时间后重试
 			select {
 			case <-ctx.Done():
 				return
@@ -132,6 +138,7 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 		return fmt.Errorf("qos: %w", err)
 	}
 
+	// 在互斥锁的保护下，设置当前 channel，并且完成消费后清除
 	c.mu.Lock()
 	c.ch = ch
 	c.mu.Unlock()
@@ -143,6 +150,7 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 		c.mu.Unlock()
 	}()
 
+	// 开始消费
 	deliveries, err := ch.Consume(
 		c.cfg.Queue,
 		"",    // consumer tag
@@ -163,6 +171,7 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 		"prefetch", c.cfg.Prefetch,
 	)
 
+	// 循环从消息队列里接收消息，直到 ctx 结束或 channel 关闭
 	for {
 		select {
 		case <-ctx.Done():
@@ -186,13 +195,14 @@ func (c *Consumer) handleDelivery(ctx context.Context, d *amqp.Delivery) {
 			logger.FieldErr, err,
 			"body", string(d.Body),
 		)
-		_ = d.Nack(false, false) // 非法消息丢弃，避免死循环
+		d.Nack(false, false) // 非法消息丢弃，避免死循环
 		return
 	}
 
 	jobCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
+	// 执行业务回调
 	if err := c.handle(jobCtx, chartID); err != nil {
 		c.log.Error("job failed, requeue",
 			logger.FieldPurpose, logger.PurposeBiz,
@@ -200,7 +210,7 @@ func (c *Consumer) handleDelivery(ctx context.Context, d *amqp.Delivery) {
 			logger.FieldErr, err,
 			"chartId", chartID,
 		)
-		_ = d.Nack(false, true) // 瞬时错误：重新入队
+		d.Nack(false, true) // 瞬时错误：重新入队
 		return
 	}
 	if err := d.Ack(false); err != nil {

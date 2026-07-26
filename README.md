@@ -59,6 +59,8 @@
 公共库约定见：[`internal/pkg/README.md`](internal/pkg/README.md)  
 结构化日志见：[`internal/pkg/logger/README.md`](internal/pkg/logger/README.md)  
 Redis / 缓存能力见：[`docs/REDIS_CACHE.md`](docs/REDIS_CACHE.md)  
+RabbitMQ / 异步图表任务见：[`docs/RABBITMQ.md`](docs/RABBITMQ.md)  
+
 Schema 约定见：[`ent/schema/README.md`](ent/schema/README.md)
 
 ---
@@ -225,6 +227,7 @@ swag init -g cmd/server/main.go -o docs/api/swagger --parseDependency --parseInt
 | [internal/pkg/README.md](internal/pkg/README.md)               | 公共库边界                          |
 | [internal/pkg/logger/README.md](internal/pkg/logger/README.md) | **结构化日志约定与 event 表**       |
 | [docs/REDIS_CACHE.md](docs/REDIS_CACHE.md)                     | **项目级 Redis / 缓存策略**（总览） |
+| [docs/RABBITMQ.md](docs/RABBITMQ.md)                           | **RabbitMQ 异步任务队列**（生产/消费/补偿） |
 | [ent/schema/README.md](ent/schema/README.md)                   | Schema 与 generate 约定             |
 
 有疑问时：先看依赖图（第 3 节）和「放哪里」（第 7 节），再按第 6 节接入第一个 module。
