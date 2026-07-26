@@ -72,11 +72,9 @@ func (p *publisher) EnqueueGen(ctx context.Context, chartID int64) error {
 
 	// 在锁的保护下拷贝指针，避免在锁里做 io 操作
 	p.mu.Lock()
-	ch := p.ch
-	p.mu.Unlock()
-
+	defer p.mu.Unlock()
 	// 发布消息
-	return ch.PublishWithContext(ctx,
+	return p.ch.PublishWithContext(ctx,
 		p.cfg.Exchange,
 		p.cfg.RoutingKey,
 		false,

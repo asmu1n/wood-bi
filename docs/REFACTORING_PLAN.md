@@ -231,7 +231,7 @@ infra 实现 port（module 不直接依赖 infra）
 | Queue | `bi_queue`（durable） |
 | Routing key | `bi_routingKey` |
 | 消息体 | chartId（JSON 数字或字符串，实现时统一） |
-| QoS | prefetch 可配置（控制并发 AI 调用数） |
+| QoS | **每 Channel** prefetch 可配置；并行度主要由 **workers（多 Channel）** 控制 |
 
 **可靠消费约定：**
 
@@ -499,7 +499,7 @@ internal/infra/
 
 1. [x] compose 增加 RabbitMQ；拓扑声明（exchange/queue/bind）
 2. [x] `port.ChartGenQueue` + `infra/mq/rabbit` Publisher
-3. [x] Consumer 调 `ProcessGenJob`；手动 ack；状态机完整（同进程消费，可后续拆 worker）
+3. [x] Consumer 多 Channel 竞争消费调 `ProcessGenJob`；手动 ack；状态机完整（同进程，可后续拆 worker）
 4. [x] `POST /chart/gen/async`
 5. [x] Cron：长时间 `running` → failed；滞留 `wait` → 补投
 
@@ -528,7 +528,8 @@ internal/infra/
 | 允许后缀 | xlsx（可加 xls） |
 | 限流 | 每用户约 2 次/秒（可调） |
 | AI 超时 | 60–120s（可调） |
-| RabbitMQ prefetch | 2–4（对齐原线程池并发量级） |
+| RabbitMQ workers | 默认 2（`RABBITMQ_WORKERS`，每 worker 独立 Channel） |
+| RabbitMQ prefetch | 默认 1 / 每 Channel（`RABBITMQ_PREFETCH`；总未确认 ≈ workers×prefetch） |
 | gen 接口 | **sync + async 两套** |
 
 ---

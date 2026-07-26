@@ -20,20 +20,23 @@ import (
 // 返回 error：瞬时故障 → nack 并 requeue。
 type GenJobFunc func(ctx context.Context, chartID int64) error
 
-// Consumer 从 BI 队列拉取任务并调用 GenJobFunc；与 HTTP 同进程或独立 worker 均可挂载。
+// Consumer 从 BI 队列拉取任务并调用 GenJobFunc。
+// 采用多 Channel 竞争消费：每个 worker 独立 AMQP Channel，串行 handle + ack。
+// 可与 HTTP 同进程挂载，也可拆到独立进程。
 type Consumer struct {
-	cfg    mqConfig
-	conn   *amqp.Connection
-	handle GenJobFunc
-	log    *slog.Logger
+	cfg         mqConfig
+	conn        *amqp.Connection
+	handle      GenJobFunc
+	log         *slog.Logger
+	workerCount int
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	mu     sync.Mutex
-	ch     *amqp.Channel
 }
 
 // NewConsumer 创建消费者；须再调用 Start 才会真正拉取消息。
+// worker 数取 cfg.Workers（<=0 时回落为 1）。
 func NewConsumer(conn *amqp.Connection, cfg mqConfig, handle GenJobFunc) (*Consumer, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("rabbit: nil connection")
@@ -41,116 +44,122 @@ func NewConsumer(conn *amqp.Connection, cfg mqConfig, handle GenJobFunc) (*Consu
 	if handle == nil {
 		return nil, fmt.Errorf("rabbit: nil job handler")
 	}
+
+	workers := cfg.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+
 	return &Consumer{
-		cfg:    cfg,
-		conn:   conn,
-		handle: handle,
-		log:    logger.Module("rabbit"),
+		cfg:         cfg,
+		conn:        conn,
+		handle:      handle,
+		log:         logger.Module("rabbit"),
+		workerCount: workers,
 	}, nil
 }
 
-// Start 在后台启动消费循环，直到 ctx 取消或 Close。
+// Start 启动 workerCount 条后台消费循环，直到 ctx 取消或 Close。
 func (c *Consumer) Start(ctx context.Context) error {
-	// 创建带取消功能的上下文
-	runCtx, cancel := context.WithCancel(ctx)
-	// 互斥锁完成 `cancel` 的初始化
 	c.mu.Lock()
-	// 只允许启动一次
 	if c.cancel != nil {
 		c.mu.Unlock()
-		cancel()
 		return fmt.Errorf("rabbit: consumer already started")
 	}
+	runCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.loop(runCtx)
-	}()
+	for id := 0; id < c.workerCount; id++ {
+		workerID := id
+		c.wg.Add(1)
+		go c.loop(runCtx, workerID)
+	}
+
+	c.log.Info("consumer workers started",
+		logger.FieldPurpose, logger.PurposeInfra,
+		logger.FieldEvent, "rabbit.consume_workers_start",
+		"workers", c.workerCount,
+		"prefetch", c.cfg.Prefetch,
+		"queue", c.cfg.Queue,
+	)
 	return nil
 }
 
-// Close 停止消费循环并关闭当前 channel。
+// Close 取消所有 worker 并等待其退出（含 in-flight handle 随 ctx 取消返回）。
 func (c *Consumer) Close() error {
-	// 互斥锁更新状态
 	c.mu.Lock()
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
-	}
-	ch := c.ch
-	c.ch = nil
+	cancel := c.cancel
+	c.cancel = nil
 	c.mu.Unlock()
 
-	c.wg.Wait()
-	if ch != nil {
-		return ch.Close()
+	if cancel != nil {
+		cancel()
 	}
+	c.wg.Wait()
 	return nil
 }
 
-// loop 消费会话循环：断线或 channel 异常时退避重连。
-func (c *Consumer) loop(ctx context.Context) {
+// loop 单 worker 会话循环：channel/投递异常时退避重连。
+func (c *Consumer) loop(ctx context.Context, workerID int) {
+	defer c.wg.Done()
+
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		// 尝试消费消息，如果报错则记录日志并重试（`consumeOnce` 会话级长时间阻塞接收消息）
-		if err := c.consumeOnce(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.log.Error("consumer session ended",
-				logger.FieldPurpose, logger.PurposeInfra,
-				logger.FieldEvent, "rabbit.consume_error",
-				logger.FieldErr, err,
-			)
-			// 判断 ctx 是否取消，如果取消则直接退出 ，如果没有则等待 backoff 时间后重试
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff):
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
+
+		started := time.Now()
+		err := c.consumeOnce(ctx, workerID)
+		if ctx.Err() != nil {
+			return
 		}
-		return
+		if err == nil {
+			// 正常停（ctx 取消）
+			return
+		}
+
+		// 会话曾稳定运行过一段时间，则重置退避，避免偶发闪断后仍长时间空等
+		if time.Since(started) > 30*time.Second {
+			backoff = time.Second
+		}
+
+		c.log.Error("consumer session ended",
+			logger.FieldPurpose, logger.PurposeInfra,
+			logger.FieldEvent, "rabbit.consume_error",
+			logger.FieldErr, err,
+			"workerId", workerID,
+		)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
 	}
 }
 
-// consumeOnce 打开 channel、声明拓扑、Consume，并阻塞处理投递直至 ctx 结束或 channel 关闭。
-func (c *Consumer) consumeOnce(ctx context.Context) error {
+// consumeOnce 打开独立 channel、声明拓扑、Consume，并串行处理投递。
+func (c *Consumer) consumeOnce(ctx context.Context, workerID int) error {
 	ch, err := c.conn.Channel()
 	if err != nil {
-		return fmt.Errorf("open channel: %w", err)
+		return fmt.Errorf("worker %d open channel: %w", workerID, err)
 	}
 	defer ch.Close()
 
 	if err := declareTopology(ch, c.cfg); err != nil {
-		return fmt.Errorf("declare topology: %w", err)
+		return fmt.Errorf("worker %d declare topology: %w", workerID, err)
 	}
+	// 每 channel 独立 QoS；总未确认约 workers×prefetch
 	if err := ch.Qos(c.cfg.Prefetch, 0, false); err != nil {
-		return fmt.Errorf("qos: %w", err)
+		return fmt.Errorf("worker %d qos: %w", workerID, err)
 	}
 
-	// 在互斥锁的保护下，设置当前 channel，并且完成消费后清除
-	c.mu.Lock()
-	c.ch = ch
-	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		if c.ch == ch {
-			c.ch = nil
-		}
-		c.mu.Unlock()
-	}()
-
-	// 开始消费
+	// 空 tag 由 broker 生成，避免多实例/重连冲突；本地仅用 workerID 打日志
 	deliveries, err := ch.Consume(
 		c.cfg.Queue,
 		"",    // consumer tag
@@ -161,63 +170,74 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("consume: %w", err)
+		return fmt.Errorf("worker %d consume: %w", workerID, err)
 	}
 
-	c.log.Info("consumer started",
+	c.log.Info("consumer session started",
 		logger.FieldPurpose, logger.PurposeInfra,
 		logger.FieldEvent, "rabbit.consume_start",
+		"workerId", workerID,
 		"queue", c.cfg.Queue,
 		"prefetch", c.cfg.Prefetch,
 	)
 
-	// 循环从消息队列里接收消息，直到 ctx 结束或 channel 关闭
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case d, ok := <-deliveries:
 			if !ok {
-				return fmt.Errorf("delivery channel closed")
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("worker %d delivery channel closed", workerID)
 			}
-			c.handleDelivery(ctx, &d)
+			c.handleDelivery(ctx, workerID, &d)
 		}
 	}
 }
 
 // handleDelivery 解析消息、执行业务回调，并按结果 ack / nack。
-func (c *Consumer) handleDelivery(ctx context.Context, d *amqp.Delivery) {
+func (c *Consumer) handleDelivery(ctx context.Context, workerID int, d *amqp.Delivery) {
 	chartID, err := parseChartID(d.Body)
 	if err != nil {
 		c.log.Error("invalid message body",
 			logger.FieldPurpose, logger.PurposeInfra,
 			logger.FieldEvent, "rabbit.bad_message",
 			logger.FieldErr, err,
+			"workerId", workerID,
 			"body", string(d.Body),
 		)
-		d.Nack(false, false) // 非法消息丢弃，避免死循环
+		_ = d.Nack(false, false) // 非法消息丢弃，避免死循环
 		return
 	}
 
 	jobCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	// 执行业务回调
 	if err := c.handle(jobCtx, chartID); err != nil {
+		// 关停取消：不刷 error 噪音，仍 requeue 让其它实例/下次再跑
+		if ctx.Err() != nil {
+			_ = d.Nack(false, true)
+			return
+		}
 		c.log.Error("job failed, requeue",
 			logger.FieldPurpose, logger.PurposeBiz,
 			logger.FieldEvent, "rabbit.job_requeue",
 			logger.FieldErr, err,
+			"workerId", workerID,
 			"chartId", chartID,
 		)
-		d.Nack(false, true) // 瞬时错误：重新入队
+		_ = d.Nack(false, true)
 		return
 	}
+
 	if err := d.Ack(false); err != nil {
 		c.log.Error("ack failed",
 			logger.FieldPurpose, logger.PurposeInfra,
 			logger.FieldEvent, "rabbit.ack_error",
 			logger.FieldErr, err,
+			"workerId", workerID,
 			"chartId", chartID,
 		)
 	}

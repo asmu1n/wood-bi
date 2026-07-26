@@ -125,6 +125,7 @@ func main() {
 		"exchange", mqCfg.Exchange,
 		"queue", mqCfg.Queue,
 		"prefetch", mqCfg.Prefetch,
+		"workers", mqCfg.Workers,
 	)
 
 	// 定时补偿：滞留 wait 补投 / 超时 running 标失败

@@ -11,7 +11,7 @@
 | ---- | ---- | -------- |
 | **任务队列** | 图表 AI 异步生成 | `port.ChartGenQueue` + `infra/mq/rabbit` |
 | **生产者** | HTTP 异步提交后投递 `chartId` | `publisher` → `EnqueueGen` |
-| **消费者** | 后台拉取任务并执行生成 | `Consumer` → `chart.ProcessGenJob` |
+| **消费者** | 多 Channel 竞争拉取并执行生成 | `Consumer` → `chart.ProcessGenJob` |
 | **补偿** | 滞留 wait 补投 / 超时 running 失败 | `chart.CompensateStaleJobs` + cron |
 
 ```text
@@ -22,10 +22,11 @@
     落库 status=wait
     queue.EnqueueGen(chartId)  ──►  RabbitMQ bi_queue
            │                              │
-           │ 立即返回 { chartId }         │
+           │ 立即返回 { chartId }         │ 竞争投递给 N 个 worker
            ▼                              ▼
-  前端轮询 GET /chart/get          Consumer（同进程后台）
-                                         │
+  前端轮询 GET /chart/get          Consumer（同进程，多 Channel）
+                                    worker0..N-1 各 1 条 AMQP Channel
+                                         │ 串行 handle + ack
                                          ▼
                                   ProcessGenJob
                                     wait/running → AI → succeed|failed
@@ -36,6 +37,7 @@
 - 消息体很小，**真相在 Postgres**（状态、CSV、生成结果）。
 - 业务只依赖 **`port.ChartGenQueue`**；不 import `amqp`。
 - **API 与 Worker 同进程**：`cmd/server` 既监听 HTTP，也 `Consumer.Start`。
+- **并行模型 = 多 Channel 竞争消费（方案 C）**：每个 worker 独立 Channel，本 Channel 内串行处理与 ack；**不用**业务线程池在共享 Channel 上并发 ack。
 - 启动时 **Dial 失败即 Fatal**（与 AI、DB、Redis 同属核心依赖）。
 
 ---
@@ -61,7 +63,8 @@ infra/mq/rabbit       Connection / Channel / 拓扑 / ack
 | ---- | ---- |
 | module 不 import rabbit | 发消息走端口；消费走回调函数 |
 | infra 不 import chart | `GenJobFunc` 由 main 注入 `ProcessGenJob` |
-| Connection 共享 | Publisher 与 Consumer 共用 `Dial` 得到的一条连接，各用各的 Channel |
+| Connection 共享 | Publisher 与 Consumer 共用 `Dial` 得到的 **一条** TCP 连接 |
+| Channel 按角色拆分 | Publisher 1 条懒创建 Channel；Consumer **每个 worker 1 条** Channel |
 
 ---
 
@@ -77,21 +80,38 @@ infra/mq/rabbit       Connection / Channel / 拓扑 / ack
 | 消息体 | `{"chartId":123}` | JSON；消费端兼容纯数字字符串 |
 | 消息持久化 | `DeliveryMode: Persistent` | 配合 durable 队列 |
 
-生产/消费启动时都会 **幂等** `declareTopology`（Declare + Bind），无需单独 InitMain。
+生产/消费启动时都会 **幂等** `declareTopology`（Declare + Bind），无需单独运维脚本预建（多 worker 会各自 declare，参数一致即可）。
 
 ### 3.2 环境变量
 
 见 `.env.example`：
 
-| 变量 | 含义 | 默认示例 |
-| ---- | ---- | -------- |
+| 变量 | 含义 | 默认 |
+| ---- | ---- | ---- |
 | `RABBITMQ_URL` | AMQP 连接串 | `amqp://guest:guest@localhost:5672/` |
 | `RABBITMQ_BI_EXCHANGE` | 交换机名 | `bi_exchange` |
 | `RABBITMQ_BI_QUEUE` | 队列名 | `bi_queue` |
 | `RABBITMQ_BI_ROUTING_KEY` | 路由键 | `bi_routingKey` |
-| `RABBITMQ_PREFETCH` | 消费 QoS：未 ack 上限 | `2` |
+| `RABBITMQ_PREFETCH` | **每个**消费 Channel 的 QoS（未 ack 上限） | `1` |
+| `RABBITMQ_WORKERS` | 并行消费会话数（独立 Channel 数） | `2` |
 
 Compose 内 app 使用 `RABBITMQ_URL=amqp://...@rabbitmq:5672/`；本机 Go 进程用 `localhost`。
+
+#### Prefetch × Workers
+
+```text
+进程内最大未确认消息数 ≈ RABBITMQ_WORKERS × RABBITMQ_PREFETCH
+进程内并行 AI 任务数   ≈ RABBITMQ_WORKERS
+                         （每 worker 串行处理；prefetch>1 只是管道预取）
+```
+
+| 场景建议 | Workers | Prefetch | 说明 |
+| -------- | ------- | -------- | ---- |
+| 默认 / 轻量 | 2 | 1 | 公平分发，易推理 |
+| 提高吞吐 | 4～8 | 1 | 先加 worker，再考虑 prefetch |
+| 单 worker 调试 | 1 | 1 | 行为最简单 |
+
+AI 调用重、耗时长时，优先用 **Workers** 表达并行度，**Prefetch 保持 1** 通常足够。
 
 ### 3.3 Docker
 
@@ -109,17 +129,17 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 | 路径 | 职责 |
 | ---- | ---- |
 | `internal/port/queue.go` | `ChartGenQueue` 端口 |
-| `internal/infra/mq/rabbit/config.go` | 读环境、校验 |
+| `internal/infra/mq/rabbit/config.go` | 读环境（含 Workers/Prefetch）、校验 |
 | `internal/infra/mq/rabbit/dial.go` | `Dial` → Connection + Config |
 | `internal/infra/mq/rabbit/topology.go` | 声明 exchange / queue / bind |
-| `internal/infra/mq/rabbit/publisher.go` | 实现 `EnqueueGen` |
-| `internal/infra/mq/rabbit/consumer.go` | 消费循环、手动 ack |
+| `internal/infra/mq/rabbit/publisher.go` | 实现 `EnqueueGen`（懒 Channel） |
+| `internal/infra/mq/rabbit/consumer.go` | 多 worker 循环、手动 ack |
 | `internal/module/chart/service.go` | `GenerateAsync` / `ProcessGenJob` / `CompensateStaleJobs` |
 | `cmd/server/main.go` | 装配与生命周期 |
 
 ---
 
-## 5. 连接（Dial）
+## 5. 连接（Dial）与 Connection / Channel
 
 ```go
 conn, cfg, err := rabbit.Dial()
@@ -131,8 +151,17 @@ defer conn.Close()
 2. `amqp.Dial(URL)`：TCP + AMQP 握手
 3. 返回 **Connection** 与 **同一份 Config**（保证生产/消费拓扑名一致）
 
-**Connection** = 进程级长连接（贵）；**Channel** = 连接上的逻辑会话（相对便宜）。  
-Publisher / Consumer 各自持有 Channel，不共用同一条 Channel 发收。
+| 对象 | 含义 | 本项目用法 |
+| ---- | ---- | ---------- |
+| **Connection** | 进程级 TCP 长连接（相对贵） | `Dial` 一次，main `defer Close` |
+| **Channel** | 连接上的逻辑会话（相对便宜） | Pub 1 条；Consumer **每 worker 1 条** |
+
+约定：
+
+- **关掉 Channel ≠ 关掉 Connection**
+- **关掉 Connection = 其上所有 Channel 失效**
+- Publisher / 各 Consumer worker **不共享**同一条 Channel（避免并发打同一 Channel）
+- 当前 **不做 Connection 级自动重拨**；Consumer 在已有 conn 上做 **Channel 会话** 退避重建。conn 彻底断开时需进程重启（或后续增强）。
 
 ---
 
@@ -146,119 +175,129 @@ Publisher / Consumer 各自持有 Channel，不共用同一条 Channel 发收。
 EnqueueGen(ctx context.Context, chartID int64) error
 ```
 
-向 `bi_exchange` 按 `routingKey` 发布持久化 JSON 消息。
+向 `bi_exchange` 按 `routingKey` 发布持久化 JSON：`{"chartId":n}`。
 
-### 6.2 初始化与 Channel
+### 6.2 行为摘要
 
-- `NewPublisher(conn, cfg)`：保存连接与配置；当前实现 **不在构造时强制建 channel**（首次发送时 `lazyChannel`）。
-- `lazyChannel`（持锁）：
-  - 若 `ch` 可用则复用
-  - 否则 `conn.Channel()` → `declareTopology` → 赋给 `p.ch`
+| 点 | 行为 |
+| -- | ---- |
+| Channel | `lazyChannel`：无或已关则新建 + `declareTopology` |
+| 并发 | `mu` 保护 channel 指针的创建/关闭；发送路径需注意与 Channel 非并发安全约束 |
+| 持久化 | `DeliveryMode: Persistent` |
+| Close | 只关 publish Channel，**不关**共享 Connection |
+| Confirm | **未**启用 publisher confirm（入队成功以写出帧为准；可靠性另靠 DB 状态 + 补偿） |
 
-### 6.3 并发：短临界区
-
-多个 HTTP 请求会并发 `EnqueueGen`，对共享字段 `p.ch` 用 `sync.Mutex`：
-
-```go
-// 1. 锁内确保 / 创建 channel
-p.lazyChannel()
-
-// 2. 短锁只拷贝指针，避免把网络 IO 放进临界区
-p.mu.Lock()
-ch := p.ch
-p.mu.Unlock()
-
-// 3. 锁外 Publish
-ch.PublishWithContext(...)
-```
-
-| 要点 | 说明 |
-| ---- | ---- |
-| 为何加锁 | 防止并发读写 `p.ch` 的 data race |
-| 为何短锁 | `Publish` 可能阻塞；持锁发送会串行化所有请求 |
-| 局部 `ch` | 指针副本；之后 `p.ch` 被 Close 置 nil 不影响局部变量指向，但对象已关则 Publish 可能失败 |
-
-`Close()` 只关 Publisher 的 channel，**不关**共享 Connection。
-
-### 6.4 业务调用
-
-`chart.GenerateAsync`：
-
-1. 校验、限流、Excel→CSV  
-2. 落库 `status=wait`  
-3. `EnqueueGen`  
-4. 投递失败 → 更新 `failed` 并返回业务错误  
-5. 成功 → 立即返回 `{ chartId }`（HTTP 不等待 AI）
+业务侧：`GenerateAsync` 若 `EnqueueGen` 失败，会将任务标 `failed` 并返回错误。
 
 ---
 
-## 7. 消费者（Consumer）
+## 7. 消费者（Consumer）— 多 Channel 并行
 
-### 7.1 两阶段生命周期
+### 7.1 模型（方案 C）
 
-| 阶段 | 作用 |
-| ---- | ---- |
-| `NewConsumer(conn, cfg, handle)` | 只保存依赖，**不**拉消息 |
-| `Start(ctx)` | 后台 goroutine 跑 `loop` |
-| `Close()` | 取消 ctx → 等 loop 结束 → 关 channel |
-
-`handle` 类型：
-
-```go
-type GenJobFunc func(ctx context.Context, chartID int64) error
+```text
+                    ┌─ worker 0: Channel + Consume + 串行 handle/ack ─┐
+  bi_queue ─────────┼─ worker 1: Channel + Consume + 串行 handle/ack ─┼─► ProcessGenJob
+  (竞争投递)         └─ worker N-1: …                                  ┘
+         ▲
+         │ 共享
+   *amqp.Connection（Dial）
 ```
 
-main 注入：`chartSvc.ProcessGenJob`。
+| 设计点 | 说明 |
+| ------ | ---- |
+| 并行单元 | **AMQP 消费会话（Channel）**，不是共享 Channel 上的业务线程池 |
+| 每 worker | 独立 `loop` → `consumeOnce` → 独立 Channel / QoS / Consume |
+| 处理 | 同 goroutine 内 `handleDelivery` → `Ack`/`Nack`（Channel 安全） |
+| consumer tag | 传空字符串，由 broker 生成，避免多实例/重连冲突 |
+| 拓扑 | 每会话启动时幂等 `declareTopology` |
 
-### 7.2 为何是 `loop` + `consumeOnce`（而不是一次 Consume 到底）
+**刻意不做的：**
 
-`Channel().Consume()` 返回的 `<-chan Delivery` 绑定在 **某一次 AMQP Channel 会话** 上。  
-连接抖动、channel 关闭、broker 重启都会导致该 Go channel 关闭，`for range` 结束。
+- 单 Channel + worker pool 业务并行再回流 ack（方案 B）— 复杂度高，AI 场景收益有限  
+- 旁路 goroutine 在 cancel 时强关 Channel — 业务已全程透传 ctx，靠 `select` + 下游取消即可  
 
-| 层次 | 含义 |
-| ---- | ---- |
-| **`consumeOnce`** | 一次会话：开 ch → 拓扑 → Qos → Consume → `select` 读 deliveries |
-| **`loop`** | 会话失败则指数退避（1s…30s）再开下一局；`ctx` 取消则退出 |
-
-内层仍然是 **channel 持续接收**；外层负责 **会话级重连**。  
-没有外层循环 = 第一次断线后异步消费永久静默失败。
-
-### 7.3 QoS（Prefetch）
+### 7.2 生命周期
 
 ```go
-ch.Qos(prefetch, 0, false)  // 默认 2
+c, err := rabbit.NewConsumer(conn, cfg, chartSvc.ProcessGenJob)
+// workers = cfg.Workers（<=0 则 1）
+err = c.Start(ctx)   // 拉起 N 个后台 loop
+defer c.Close()      // cancel + wg.Wait，等所有 worker（含 in-flight）退出
 ```
 
-限制「未 ack」消息数量，避免 AI 慢时堆积过多 in-flight 任务。
+| API | 行为 |
+| --- | ---- |
+| `NewConsumer` | 校验 conn/handle；规范化 workers |
+| `Start` | 只允许一次；派生 `runCtx`；`for id := 0..workers-1` 启动 `loop` |
+| `Close` | 锁外取出 `cancel` → `cancel()` → **同步** `wg.Wait()`；不关 Connection |
 
-### 7.4 单条消息：ack 策略
+关停路径：
 
-`handleDelivery`：
+```text
+Close/cancel
+  → 各 worker 若在 select 等消息：<-ctx.Done() 退出会话
+  → 若在 handle：jobCtx 随父 ctx 取消 → DB/HTTP 返回 → Nack(requeue) 或收尾
+  → defer ch.Close()
+  → wg.Done；全部结束后 Close 返回
+```
 
-| 情况 | 动作 |
+要求：`ProcessGenJob` 及 repo/HTTP **遵守 ctx**，关停才不会长时间卡住。
+
+### 7.3 单 worker 会话（`loop` / `consumeOnce`）
+
+```text
+loop:
+  consumeOnce
+    Channel() → declareTopology → Qos(prefetch) → Consume
+    for select:
+      ctx.Done           → return nil（正常停）
+      deliveries 关闭
+        · ctx 已取消     → return nil
+        · 否则           → return error → loop 退避重连
+      消息               → handleDelivery（同步）
+  若 error 且 ctx 未取消:
+    会话曾稳定运行 >30s → backoff 重置为 1s
+    sleep backoff（指数，上限 30s）再开会话
+```
+
+说明：
+
+- **重的是 Channel 会话重建**，不是 `amqp.Dial` 重连。  
+- `deliveries` 因 broker/网络异常关闭 → 打 `rabbit.consume_error` 后退避再 `consumeOnce`。  
+
+### 7.4 单条消息（`handleDelivery`）
+
+| 步骤 | 行为 |
 | ---- | ---- |
-| body 无法解析 | `Nack(requeue=false)` 丢弃，防毒消息死循环 |
-| `handle` 返回 **error** | `Nack(requeue=true)` 瞬时故障重试 |
-| `handle` 返回 **nil** | `Ack`（含业务失败已写入 DB 的情况） |
+| 解析 body | JSON `chartId` 或纯数字；失败 → `Nack(requeue=false)` 丢弃 |
+| 超时 | `context.WithTimeout(ctx, 3m)` 包一层再调 `handle` |
+| `handle` 返回 nil | `Ack` |
+| `handle` 返回 error 且父 ctx 未取消 | 日志 `rabbit.job_requeue` + `Nack(requeue=true)` |
+| `handle` 返回 error 且正在关停 | 静默 `Nack(requeue=true)`，减少噪音 |
 
-单任务 `context` 超时默认 **3 分钟**。
+### 7.5 与 `ProcessGenJob` 的 ack 约定
 
-### 7.5 与 `ProcessGenJob` 的约定（关键）
-
-| `ProcessGenJob` 返回 | 含义 | MQ |
-| -------------------- | ---- | -- |
+| 回调结果 | 含义 | Consumer 动作 |
+| -------- | ---- | ------------- |
 | `nil` + succeed | 生成成功 | Ack |
 | `nil` + 已 `failJob` | AI/数据等业务失败，已标 failed | Ack（**不要 requeue**） |
 | `nil` + 已是 succeed/failed | 幂等跳过 | Ack |
-| `error` | DB 等瞬时错误 | Nack requeue |
+| `error` | DB 等瞬时错误（或 ctx 取消） | Nack requeue |
 
-状态在 DB，消息只带 ID → 消费可幂等。
+状态在 DB，消息只带 ID → 消费可幂等；补偿任务兜底「wait 滞留 / running 超时」。
 
-### 7.6 `Close` 与并发
+### 7.6 日志 event（消费侧）
 
-- `mu` 保护 `cancel`、当前 `ch`（与 Start/loop 交错）  
-- `WaitGroup` 等待后台 `loop` 退出  
-- 取消 `runCtx` 使 `select` 从读 deliveries 中醒来  
+| event | 含义 |
+| ----- | ---- |
+| `rabbit.consume_workers_start` | N 个 worker 已拉起 |
+| `rabbit.consume_start` | 某 worker 会话（Channel）已 Consume |
+| `rabbit.consume_error` | 某 worker 会话异常结束，将退避重连 |
+| `rabbit.bad_message` | 非法 body，丢弃 |
+| `rabbit.job_requeue` | 业务瞬时失败，requeue |
+| `rabbit.ack_error` | Ack 失败 |
+| `rabbit.ready` | main 装配完成（含 exchange/queue/prefetch/**workers**） |
 
 ---
 
@@ -275,28 +314,26 @@ chartSvc.CompensateStaleJobs(ctx)
 | `running` | `updated_at` 过旧 | 标 `failed`（执行超时） |
 | `wait` | `updated_at` 过旧 | 再次 `EnqueueGen` 补投 |
 
-用于：投递后消费未执行、进程崩溃、消息丢失等。
+用于：投递后消费未执行、进程崩溃、关机 requeue 风暴后的兜底等。
 
 ---
 
 ## 9. 装配顺序（cmd/server）
 
-必须按依赖顺序：
-
 ```text
 1. Dial
 2. NewPublisher
-3. NewService(..., mqPub)          // 需要 queue
-4. NewConsumer(..., ProcessGenJob) // 需要 Service 方法
+3. NewService(..., mqPub)                     // 需要 queue
+4. NewConsumer(conn, cfg, ProcessGenJob)     // workers 来自 cfg.Workers
 5. Consumer.Start(ctx)
 6. 注册 CompensateStaleJobs cron
 7. HTTP Listen
 ```
 
-关停建议顺序（defer 栈 LIFO）：
+关停（defer LIFO，与代码 defer 顺序一致即可）：
 
 ```text
-Consumer.Close → Publisher.Close → Connection.Close
+Consumer.Close →（scheduler stop）→ Publisher.Close → Connection.Close
 ```
 
 核心依赖失败（含 Dial）→ `logger.Fatal`，不做「无 MQ 半残启动」。
@@ -324,9 +361,10 @@ Consumer.Close → Publisher.Close → Connection.Close
 | 拓扑名 | bi_exchange / bi_queue / bi_routingKey | 同默认 |
 | 消息 | chartId 字符串 | JSON `chartId`（兼容数字串） |
 | 生产 | Controller → BiMessageProducer | Service → port → Publisher |
-| 消费 | `@RabbitListener` 同进程 | Consumer.Start 同进程 |
+| 消费 | `@RabbitListener` 同进程 | 同进程多 Channel worker |
+| 并行 | 视监听容器并发 | `RABBITMQ_WORKERS` × 独立 Channel |
 | 编排 | 大量逻辑在 Consumer | 编排在 `ProcessGenJob` |
-| 建拓扑 | 手写 BiInitMain | 运行时 declareTopology |
+| 建拓扑 | 手写 BiInitMain | 运行时 `declareTopology` |
 
 ---
 
@@ -335,12 +373,13 @@ Consumer.Close → Publisher.Close → Connection.Close
 | 现象 | 可能原因 |
 | ---- | -------- |
 | 启动 Fatal dial | Rabbit 未起、URL/端口/账号错误 |
-| 异步一直 wait | Consumer 未 Start、队列名不一致、prefetch/处理卡住 |
-| 反复 requeue | `ProcessGenJob` 持续返回 error（查 DB/日志） |
+| 异步一直 wait | Consumer 未 Start、队列名不一致、workers=0（已兜底为 1）、处理卡住 |
+| 并发上不去 | `RABBITMQ_WORKERS` 过小；或误以为只调大 prefetch 就能并行（每 worker 仍串行） |
+| 单机 AI 打满 | workers × 任务过重；下调 `RABBITMQ_WORKERS` |
+| 反复 requeue | `ProcessGenJob` 持续返回 error（查 DB/日志 `rabbit.job_requeue`） |
 | 直接 failed | 投递失败、AI 失败、补偿超时 |
-| 管理台无队列 | 尚未有进程 declare；先成功启动 app 或手动声明 |
-
-日志 event 示例：`rabbit.ready`、`rabbit.consume_start`、`rabbit.job_requeue`、`chart.gen_async_ok`、`chart.job_succeed`。
+| 关停很慢 | in-flight AI 未及时响应 ctx；查下游是否透传 cancel |
+| 管理台无队列 | 尚未有进程 declare；先成功启动 app |
 
 ---
 
@@ -348,11 +387,11 @@ Consumer.Close → Publisher.Close → Connection.Close
 
 - 拆 `cmd/worker`：仅 API 发消息，Worker 只消费  
 - 死信队列（DLX）替代无限 requeue  
-- Connection 级自动重拨（当前侧重 channel 会话重建）  
+- **Connection 级**自动重拨 + 安全替换共享 conn  
+- Publisher confirm / 发布端更强投递保证  
 - 跨模块 **领域事件** 总线（与当前「图表任务命令队列」分层，勿混为一谈）  
 
-更细的互斥锁 / 短临界区笔记见博客项目木屑：  
-`AsMuin_WebSite/sawdust/go-mutex-short-critical-section.md`（路由 `/sawdust/go-mutex-short-critical-section`）。
+通用任务池（`internal/pkg/worker`）可用于其它批处理场景；**当前 MQ 消费路径不依赖它**（并行已由多 Channel 表达）。
 
 ---
 
@@ -362,4 +401,3 @@ Consumer.Close → Publisher.Close → Connection.Close
 - [REFACTORING_PLAN.md](./REFACTORING_PLAN.md) — 重构与 Phase 分期  
 - `.env.example` — 环境变量模板  
 - `docker-compose.yml` / `docker-compose.dev.yml` — RabbitMQ 服务与端口  
-

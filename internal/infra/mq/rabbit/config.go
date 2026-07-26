@@ -13,7 +13,11 @@ type mqConfig struct {
 	Exchange   string // 交换机名（direct）
 	Queue      string // 队列名
 	RoutingKey string // 绑定路由键
-	Prefetch   int    // 消费端 QoS：未确认消息上限，限制并发
+	// Prefetch 每个消费 Channel 的 QoS（未确认消息上限）。
+	// 多 worker 时总飞行中约 Workers×Prefetch。
+	Prefetch int
+	// Workers 并行消费会话数（每会话独立 Channel，串行 handle+ack）。
+	Workers int
 }
 
 // LoadConfig 从环境变量加载配置（公开给装配层复用）。
@@ -24,9 +28,13 @@ func LoadConfig() mqConfig {
 // loadConfig 读取 RABBITMQ_* 环境变量并填充默认拓扑名。
 func loadConfig() mqConfig {
 	config.LoadEnv()
-	prefetch, _ := strconv.Atoi(config.GetEnv("RABBITMQ_PREFETCH", "2"))
+	prefetch, _ := strconv.Atoi(config.GetEnv("RABBITMQ_PREFETCH", "1"))
 	if prefetch <= 0 {
-		prefetch = 2
+		prefetch = 1
+	}
+	workers, _ := strconv.Atoi(config.GetEnv("RABBITMQ_WORKERS", "2"))
+	if workers <= 0 {
+		workers = 2
 	}
 	return mqConfig{
 		URL:        config.GetEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
@@ -34,6 +42,7 @@ func loadConfig() mqConfig {
 		Queue:      config.GetEnv("RABBITMQ_BI_QUEUE", "bi_queue"),
 		RoutingKey: config.GetEnv("RABBITMQ_BI_ROUTING_KEY", "bi_routingKey"),
 		Prefetch:   prefetch,
+		Workers:    workers,
 	}
 }
 
