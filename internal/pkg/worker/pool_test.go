@@ -234,20 +234,6 @@ func TestParentContextCancelPropagatesToTask(t *testing.T) {
 	h.Stop()
 }
 
-func TestNilTask(t *testing.T) {
-	h := Start[int](context.Background(), 1, 1)
-	defer func() {
-		go func() {
-			for range h.GetResultQueue() {
-			}
-		}()
-		h.Stop()
-	}()
-	if err := h.Submit(nil); !errors.Is(err, ErrNilTask) {
-		t.Fatalf("got %v", err)
-	}
-}
-
 func TestConcurrentSubmits(t *testing.T) {
 	h := Start[int](context.Background(), 4, 8)
 

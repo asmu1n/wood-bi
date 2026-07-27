@@ -20,10 +20,6 @@ import (
 var (
 	// ErrFull TrySubmit 时任务队列已满。
 	ErrFull = errors.New("worker: task queue full")
-	// ErrNilTask 提交了 nil 函数。
-	ErrNilTask = errors.New("worker: nil task")
-	// ErrNilHandle 在 nil Handle 上调用 Submit。
-	ErrNilHandle = errors.New("worker: nil handle")
 )
 
 type task[T any] struct {
