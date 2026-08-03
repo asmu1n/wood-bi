@@ -499,7 +499,8 @@ internal/infra/
 
 1. [x] compose 增加 RabbitMQ；拓扑声明（exchange/queue/bind）
 2. [x] `port.ChartGenQueue` + `infra/mq/rabbit` Publisher
-3. [x] Consumer 多 Channel 竞争消费调 `ProcessGenJob`；手动 ack；状态机完整（同进程，可后续拆 worker）
+3. [x] Consumer 多 Channel 竞争消费调 `ProcessGenJob`；手动 ack；状态机完整
+4. [x] 拆 `cmd/worker`：API 只 Publish，Worker 负责 Consume + 补偿
 4. [x] `POST /chart/gen/async`
 5. [x] Cron：长时间 `running` → failed；滞留 `wait` → 补投
 

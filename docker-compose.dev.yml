@@ -1,8 +1,9 @@
-# Dev overlay: expose DB/Redis on fixed host ports; do not start app by default.
-# Host Go process uses code defaults (DB_HOST/REDIS_HOST=localhost).
+# Dev overlay: expose DB/Redis/RabbitMQ on fixed host ports; do not start app/worker by default.
+# Host Go processes use code defaults (DB_HOST/REDIS_HOST=localhost).
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-#   go run ./cmd/server
+#   go run ./cmd/server    # HTTP + 异步投递
+#   go run ./cmd/worker    # MQ 消费 + 滞留补偿
 #
 # Optional full stack in containers:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile full up -d --build
@@ -25,3 +26,6 @@ services:
     profiles: ["full"]
     ports:
       - "8080:8080"
+
+  worker:
+    profiles: ["full"]

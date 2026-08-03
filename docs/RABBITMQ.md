@@ -15,56 +15,63 @@
 | **补偿** | 滞留 wait 补投 / 超时 running 失败 | `chart.CompensateStaleJobs` + cron |
 
 ```text
-  POST /api/chart/gen/async
+  POST /api/chart/gen/async          cmd/server（API）
            │
            ▼
   chart.GenerateAsync
     落库 status=wait
     queue.EnqueueGen(chartId)  ──►  RabbitMQ bi_queue
            │                              │
-           │ 立即返回 { chartId }         │ 竞争投递给 N 个 worker
+           │ 立即返回 { chartId }         │ 竞争投递
            ▼                              ▼
-  前端轮询 GET /chart/get          Consumer（同进程，多 Channel）
-                                    worker0..N-1 各 1 条 AMQP Channel
+  前端轮询 GET /chart/get          cmd/worker（独立进程）
+                                    Consumer：worker0..N-1 各 1 条 Channel
                                          │ 串行 handle + ack
                                          ▼
                                   ProcessGenJob
                                     wait/running → AI → succeed|failed
+
+  cmd/worker 另跑 cron：CompensateStaleJobs（滞留 wait 补投 / 超时 running 失败）
 ```
 
 要点：
 
 - 消息体很小，**真相在 Postgres**（状态、CSV、生成结果）。
 - 业务只依赖 **`port.ChartGenQueue`**；不 import `amqp`。
-- **API 与 Worker 同进程**：`cmd/server` 既监听 HTTP，也 `Consumer.Start`。
-- **并行模型 = 多 Channel 竞争消费（方案 C）**：每个 worker 独立 Channel，本 Channel 内串行处理与 ack；**不用**业务线程池在共享 Channel 上并发 ack。
-- 启动时 **Dial 失败即 Fatal**（与 AI、DB、Redis 同属核心依赖）。
+- **API 与 Worker 分进程**：`cmd/server` 只 HTTP + 投递；`cmd/worker` 只消费 + 补偿。
+- **并行模型 = 多 Channel 竞争消费（方案 C）**：每个消费会话独立 Channel，本 Channel 内串行处理与 ack；**不用**业务线程池在共享 Channel 上并发 ack。跨进程再叠加多副本 `worker` 水平扩容。
+- 启动时 **Dial 失败即 Fatal**（API 无 Publisher / Worker 无 Consumer 均视为不可用）。
 
 ---
 
 ## 2. 分层与依赖方向
 
 ```text
-cmd/server
-  Dial → NewPublisher → NewService(..., pub)
-       → NewConsumer(conn, cfg, chartSvc.ProcessGenJob) → Start
-       │
-       ▼
-module/chart          只依赖 port.ChartGenQueue / ProcessGenJob
-       │
-       ▼
-internal/port         ChartGenQueue.EnqueueGen
-       ▲
-       │ 实现
-infra/mq/rabbit       Connection / Channel / 拓扑 / ack
+cmd/server                         cmd/worker
+  Dial → NewPublisher                Dial → NewPublisher（补偿补投）
+       → NewService(..., pub)             → NewService(..., pub)  // limiter=nil
+       → HTTP Listen                      → NewConsumer(..., ProcessGenJob) → Start
+                                          → cron CompensateStaleJobs
+       │                                  │
+       └──────────────┬───────────────────┘
+                      ▼
+               module/chart
+                 只依赖 port.ChartGenQueue / ProcessGenJob
+                      │
+                      ▼
+               internal/port  ChartGenQueue.EnqueueGen
+                      ▲
+                      │ 实现
+               infra/mq/rabbit  Connection / Channel / 拓扑 / ack
 ```
 
 | 规则 | 说明 |
 | ---- | ---- |
 | module 不 import rabbit | 发消息走端口；消费走回调函数 |
-| infra 不 import chart | `GenJobFunc` 由 main 注入 `ProcessGenJob` |
-| Connection 共享 | Publisher 与 Consumer 共用 `Dial` 得到的 **一条** TCP 连接 |
-| Channel 按角色拆分 | Publisher 1 条懒创建 Channel；Consumer **每个 worker 1 条** Channel |
+| infra 不 import chart | `GenJobFunc` 由 `cmd/worker` 注入 `ProcessGenJob` |
+| 进程职责 | **server**：迁移 + HTTP + Publish；**worker**：Consume + 补偿（及补偿所需 Publish） |
+| Connection | 每个进程各自 `Dial` 一条连接；进程内 Publisher/Consumer 可共享该连接 |
+| Channel 按角色拆分 | Publisher 1 条懒创建 Channel；Consumer **每个消费会话 1 条** Channel |
 
 ---
 
@@ -135,7 +142,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 | `internal/infra/mq/rabbit/publisher.go` | 实现 `EnqueueGen`（懒 Channel） |
 | `internal/infra/mq/rabbit/consumer.go` | 多 worker 循环、手动 ack |
 | `internal/module/chart/service.go` | `GenerateAsync` / `ProcessGenJob` / `CompensateStaleJobs` |
-| `cmd/server/main.go` | 装配与生命周期 |
+| `cmd/server/main.go` | API：迁移、HTTP、Publisher |
+| `cmd/worker/main.go` | Worker：Consumer、补偿 cron |
 
 ---
 
@@ -297,13 +305,14 @@ loop:
 | `rabbit.bad_message` | 非法 body，丢弃 |
 | `rabbit.job_requeue` | 业务瞬时失败，requeue |
 | `rabbit.ack_error` | Ack 失败 |
-| `rabbit.ready` | main 装配完成（含 exchange/queue/prefetch/**workers**） |
+| `rabbit.publisher_ready` | API 侧 Publisher 就绪 |
+| `worker.ready` | Worker 侧 Consumer + 补偿就绪（含 prefetch/**workers**） |
 
 ---
 
 ## 8. 补偿任务
 
-`cmd/server` 注册 cron（每分钟）：
+`cmd/worker` 注册 cron（每分钟）：
 
 ```go
 chartSvc.CompensateStaleJobs(ctx)
@@ -316,27 +325,53 @@ chartSvc.CompensateStaleJobs(ctx)
 
 用于：投递后消费未执行、进程崩溃、关机 requeue 风暴后的兜底等。
 
+> 多副本 `worker` 时补偿可能并发执行；依赖 `ProcessGenJob` 对终态幂等与 DB 更新兜底。若以后要严格单飞，可加分布式锁（现有 `port.Locker`）。
+
 ---
 
-## 9. 装配顺序（cmd/server）
+## 9. 装配顺序
+
+### 9.1 cmd/server（API）
 
 ```text
-1. Dial
-2. NewPublisher
-3. NewService(..., mqPub)                     // 需要 queue
-4. NewConsumer(conn, cfg, ProcessGenJob)     // workers 来自 cfg.Workers
-5. Consumer.Start(ctx)
-6. 注册 CompensateStaleJobs cron
-7. HTTP Listen
+1. DB.Migrate
+2. Dial → NewPublisher
+3. NewService(..., mqPub)   // HTTP 异步投递；同步 gen 仍用 AI
+4. HTTP Listen
 ```
 
-关停（defer LIFO，与代码 defer 顺序一致即可）：
+关停：`Publisher.Close` → `Connection.Close`（及 DB/Redis）。
+
+### 9.2 cmd/worker（消费）
 
 ```text
-Consumer.Close →（scheduler stop）→ Publisher.Close → Connection.Close
+1. Dial → NewPublisher          // 补偿补投
+2. NewService(..., mqPub)       // limiter=nil
+3. NewConsumer(..., ProcessGenJob) → Start   // RABBITMQ_WORKERS
+4. 注册 CompensateStaleJobs cron
+5. 阻塞等待 signal（ctx.Done）
 ```
 
-核心依赖失败（含 Dial）→ `logger.Fatal`，不做「无 MQ 半残启动」。
+关停（defer LIFO）：
+
+```text
+Consumer.Close → scheduler.Stop → Publisher.Close → Connection.Close
+```
+
+核心依赖失败（含 Dial / AI）→ `logger.Fatal`，不做「无 MQ 半残启动」。
+
+### 9.3 本地双进程
+
+```bash
+# 依赖
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# 终端 1
+go run ./cmd/server
+
+# 终端 2（异步 chart 必需，否则任务会一直 wait，直到补偿也因无 worker 无效）
+go run ./cmd/worker
+```
 
 ---
 
@@ -361,7 +396,7 @@ Consumer.Close →（scheduler stop）→ Publisher.Close → Connection.Close
 | 拓扑名 | bi_exchange / bi_queue / bi_routingKey | 同默认 |
 | 消息 | chartId 字符串 | JSON `chartId`（兼容数字串） |
 | 生产 | Controller → BiMessageProducer | Service → port → Publisher |
-| 消费 | `@RabbitListener` 同进程 | 同进程多 Channel worker |
+| 消费 | `@RabbitListener` 同进程 | **独立** `cmd/worker` 多 Channel 消费 |
 | 并行 | 视监听容器并发 | `RABBITMQ_WORKERS` × 独立 Channel |
 | 编排 | 大量逻辑在 Consumer | 编排在 `ProcessGenJob` |
 | 建拓扑 | 手写 BiInitMain | 运行时 `declareTopology` |
@@ -373,25 +408,26 @@ Consumer.Close →（scheduler stop）→ Publisher.Close → Connection.Close
 | 现象 | 可能原因 |
 | ---- | -------- |
 | 启动 Fatal dial | Rabbit 未起、URL/端口/账号错误 |
-| 异步一直 wait | Consumer 未 Start、队列名不一致、workers=0（已兜底为 1）、处理卡住 |
+| 异步一直 wait | **未启动 `cmd/worker`**、队列名不一致、workers=0（已兜底为 1）、处理卡住 |
 | 并发上不去 | `RABBITMQ_WORKERS` 过小；或误以为只调大 prefetch 就能并行（每 worker 仍串行） |
 | 单机 AI 打满 | workers × 任务过重；下调 `RABBITMQ_WORKERS` |
 | 反复 requeue | `ProcessGenJob` 持续返回 error（查 DB/日志 `rabbit.job_requeue`） |
 | 直接 failed | 投递失败、AI 失败、补偿超时 |
 | 关停很慢 | in-flight AI 未及时响应 ctx；查下游是否透传 cancel |
-| 管理台无队列 | 尚未有进程 declare；先成功启动 app |
+| 管理台无队列 | 尚未有进程 declare；先成功启动 server 或 worker（二者均会 declare） |
 
 ---
 
 ## 13. 演进备忘（非当前实现）
 
-- 拆 `cmd/worker`：仅 API 发消息，Worker 只消费  
+- [x] 拆 `cmd/worker`：API 只发消息，Worker 只消费 + 补偿  
 - 死信队列（DLX）替代无限 requeue  
 - **Connection 级**自动重拨 + 安全替换共享 conn  
 - Publisher confirm / 发布端更强投递保证  
+- 补偿任务多副本单飞（分布式锁）  
 - 跨模块 **领域事件** 总线（与当前「图表任务命令队列」分层，勿混为一谈）  
 
-通用任务池（`internal/pkg/worker`）可用于其它批处理场景；**当前 MQ 消费路径不依赖它**（并行已由多 Channel 表达）。
+通用任务池（`internal/pkg/worker`）可用于其它批处理场景；**当前 MQ 消费路径不依赖它**（并行已由多 Channel / 多 worker 进程表达）。
 
 ---
 

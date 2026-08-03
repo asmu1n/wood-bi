@@ -24,7 +24,8 @@
 ```text
 .
 ├── cmd/
-│   └── server/          # HTTP API 入口（装配 DB/Redis/路由/定时任务）
+│   ├── server/          # HTTP API：迁移、路由、异步任务投递（Publisher）
+│   └── worker/          # MQ 消费者：chart AI 生成 + 滞留补偿 cron
 ├── docs/
 │   └── api/swagger/     # OpenAPI 生成物（Swagger UI 读这里）
 ├── ent/
@@ -47,7 +48,8 @@
 
 | 路径                | 职责                                  | 典型改动                       |
 | ------------------- | ------------------------------------- | ------------------------------ |
-| `cmd/server`        | 组装依赖、启停 HTTP/cron、`logger.Init` | 新模块注入、新定时任务       |
+| `cmd/server`        | 组装依赖、启停 HTTP、Publisher、`logger.Init` | 新模块注入、API 侧依赖     |
+| `cmd/worker`        | 组装 Consumer、补偿 cron、AI 执行           | 异步任务扩缩、消费侧依赖   |
 | `internal/module/*` | 领域模型、用例、该业务的 API 与持久化 | **日常业务开发主战场**         |
 | `internal/httpapi`  | 挂路由、全局鉴权、健康检查            | 注册新 module 的路由           |
 | `internal/port`     | Cache / Locker 等抽象                 | 新增跨模块技术能力时扩接口     |
@@ -68,20 +70,21 @@ Schema 约定见：[`ent/schema/README.md`](ent/schema/README.md)
 ## 3. 依赖方向（必读）
 
 ```text
-cmd/server
-    │
-    ▼
- httpapi  ──────────────────►  module/*/http
-    │                               │
-    │                               ▼
-    │                          module/* (Service)
-    │                               │
-    │                    ┌──────────┼──────────┐
-    │                    ▼          ▼          ▼
-    │                  port        pkg     （其他 module 的 Service）
-    │                    ▲
-    │                    │ 实现
-    └──────────────►  infra
+cmd/server                              cmd/worker
+    │                                       │
+    ▼                                       ▼
+ httpapi ──► module/*/http            Consumer + cron
+                    │                       │
+                    └──────────┬────────────┘
+                               ▼
+                        module/* (Service)
+                               │
+                     ┌─────────┼─────────┐
+                     ▼         ▼         ▼
+                   port       pkg   （其他 module Service）
+                     ▲
+                     │ 实现
+                   infra
 ```
 
 **规则：**
@@ -106,7 +109,7 @@ POST /api/<resource>
   → infra 实际读写 DB / Redis
 ```
 
-定时任务在 `cmd/server` 用 `infra/scheduler` 注册，**业务逻辑仍写在对应 module**。
+定时任务在对应进程用 `infra/scheduler` 注册（chart 补偿在 `cmd/worker`），**业务逻辑仍写在对应 module**。
 
 ---
 
@@ -141,16 +144,24 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 开发期几乎不改的宿主端口映射已写死在 `docker-compose.dev.yml`，不再做成 `*_HOST_PORT` 配置项。
 
-### 5.3 运行 API
+### 5.3 运行 API 与 Worker
+
+异步图表生成需要 **两个进程**（API 投递，Worker 消费）。仅起 server 时任务会停在 `wait`。
 
 ```bash
 # 生产/预发常见覆盖见 .env.example（LOG_LEVEL / ENV / SERVICE_NAME / DB_* / REDIS_* …）
+
+# 终端 1：HTTP API（迁移 + 投递 MQ）
 go run ./cmd/server
 # 默认 :8080
 # 健康检查：http://localhost:8080/health
 # Swagger UI：http://localhost:8080/swagger/index.html
-# 生成物目录：docs/api/swagger（import: wood-bi/docs/api/swagger）
+
+# 终端 2：chart 生成 Worker（消费 MQ + 滞留补偿）
+go run ./cmd/worker
 ```
+
+Compose 全栈（`profile full`）会同时启动 `app` 与 `worker` 容器（同镜像、不同 command）。
 
 访问日志目前来自 **Gin 默认 Logger**（`gin.Default`）；业务 / 任务 / 审计使用 `internal/pkg/logger` 结构化输出（stderr）。详见 [logger README](internal/pkg/logger/README.md)。
 

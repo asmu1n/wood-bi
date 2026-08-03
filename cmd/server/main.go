@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"wood-bi/internal/httpapi"
 	"wood-bi/internal/infra/ai"
@@ -13,7 +12,6 @@ import (
 	"wood-bi/internal/infra/mq/rabbit"
 	"wood-bi/internal/infra/ratelimit"
 	"wood-bi/internal/infra/redis"
-	"wood-bi/internal/infra/scheduler"
 	"wood-bi/internal/module/chart"
 	chartrepo "wood-bi/internal/module/chart/repo"
 	"wood-bi/internal/module/user"
@@ -78,6 +76,7 @@ func main() {
 		)
 	}
 
+	// API 进程只生产消息；消费与补偿在 cmd/worker。
 	mqConn, mqCfg, err := rabbit.Dial()
 	if err != nil {
 		logger.Fatal("rabbitmq connect failed",
@@ -98,56 +97,17 @@ func main() {
 	}
 	defer mqPub.Close()
 
+	logger.Info("rabbitmq publisher ready",
+		logger.FieldPurpose, logger.PurposeInfra,
+		logger.FieldEvent, "rabbit.publisher_ready",
+		"exchange", mqCfg.Exchange,
+		"queue", mqCfg.Queue,
+		"routingKey", mqCfg.RoutingKey,
+	)
+
 	limiter := ratelimit.New(redisClient)
 	userSvc := user.NewService(userrepo.New(db.Client))
 	chartSvc := chart.NewService(chartrepo.New(db.Client), aiClient, limiter, mqPub)
-
-	mqConsumer, err := rabbit.NewConsumer(mqConn, mqCfg, chartSvc.ProcessGenJob)
-	if err != nil {
-		logger.Fatal("rabbit consumer init failed",
-			logger.FieldPurpose, logger.PurposeInfra,
-			logger.FieldEvent, "rabbit.consumer_fail",
-			logger.FieldErr, err,
-		)
-	}
-	if err := mqConsumer.Start(ctx); err != nil {
-		logger.Fatal("rabbit consumer start failed",
-			logger.FieldPurpose, logger.PurposeInfra,
-			logger.FieldEvent, "rabbit.consumer_start_fail",
-			logger.FieldErr, err,
-		)
-	}
-	defer mqConsumer.Close()
-
-	logger.Info("rabbitmq ready",
-		logger.FieldPurpose, logger.PurposeInfra,
-		logger.FieldEvent, "rabbit.ready",
-		"exchange", mqCfg.Exchange,
-		"queue", mqCfg.Queue,
-		"prefetch", mqCfg.Prefetch,
-		"workers", mqCfg.Workers,
-	)
-
-	// 定时补偿：滞留 wait 补投 / 超时 running 标失败
-	sched := scheduler.New()
-	if _, err := sched.Schedule("0 * * * * *", func() {
-		chartSvc.CompensateStaleJobs(context.Background())
-	}); err != nil {
-		logger.Fatal("schedule compensate job failed", logger.FieldErr, err)
-	}
-	sched.Start()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := sched.Stop(shutdownCtx); err != nil {
-			logger.Warn("scheduler stop",
-				logger.FieldPurpose, logger.PurposeJob,
-				logger.FieldModule, "scheduler",
-				logger.FieldEvent, "cron.stop_error",
-				logger.FieldErr, err,
-			)
-		}
-	}()
 
 	r.Use(sessions.Sessions("session", store))
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

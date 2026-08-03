@@ -1,13 +1,38 @@
-# Base stack: postgres + redis + app.
+# Base stack: postgres + redis + rabbitmq + app(API) + worker.
 # Runtime secrets/hosts come from env / .env (see .env.example).
 # Dev host port mapping is fixed in docker-compose.dev.yml (not parameterized).
 #
 # Dev (deps only, Go on host):
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   go run ./cmd/server    # 终端 1：HTTP + 投递
+#   go run ./cmd/worker    # 终端 2：消费 + 补偿
 # Full stack locally:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile full up -d --build
 # Base only (all services, no host ports for DB/Redis):
 #   docker compose up -d --build
+
+x-app-environment: &app-environment
+  # In-compose network: service DNS names (not host localhost).
+  DB_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  POSTGRES_DB: ${POSTGRES_DB:-wood-bi_db}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/
+  RABBITMQ_BI_EXCHANGE: ${RABBITMQ_BI_EXCHANGE:-bi_exchange}
+  RABBITMQ_BI_QUEUE: ${RABBITMQ_BI_QUEUE:-bi_queue}
+  RABBITMQ_BI_ROUTING_KEY: ${RABBITMQ_BI_ROUTING_KEY:-bi_routingKey}
+  RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-1}
+  RABBITMQ_WORKERS: ${RABBITMQ_WORKERS:-2}
+  AI_BASE_URL: ${AI_BASE_URL:-}
+  AI_API_KEY: ${AI_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-}
+  ENV: ${ENV:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  LOG_FORMAT: ${LOG_FORMAT:-}
 
 services:
   postgres:
@@ -59,23 +84,9 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ${APP_IMAGE:-wood-bi:local}
+    command: ["./server"]
     environment:
-      # In-compose network: service DNS names (not host localhost).
-      DB_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-wood-bi_db}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/
-      AI_BASE_URL: ${AI_BASE_URL:-}
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-}
-      ENV: ${ENV:-}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      LOG_FORMAT: ${LOG_FORMAT:-}
+      <<: *app-environment
       SERVICE_NAME: ${SERVICE_NAME:-wood-bi}
     ports:
       - "8080:8080"
@@ -86,6 +97,25 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: unless-stopped
+
+  # 与 app 同镜像；只跑消费与补偿，可独立 replicas 扩缩 AI 并发。
+  worker:
+    image: ${APP_IMAGE:-wood-bi:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./worker"]
+    environment:
+      <<: *app-environment
+      SERVICE_NAME: ${SERVICE_NAME:-wood-bi}-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      app:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
